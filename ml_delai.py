@@ -19,12 +19,12 @@ targets_file = 'targets.pkl'
 
 chunk_definition_dict = {'training_examples':0.79, 'validation_examples':0.01, 'test_examples':0.20}
 
-learning_rate = 0.00001
-batch_size = 128
+learning_rate = 0.01
+batch_size = 5
 epochs = 100
-hu = [100,50]
+hu = [30,10]
 
-save_dir = '20180727_classifier'
+save_dir = '20180731_classifier'
 
 ####################
 #### FUNCTIONS #####
@@ -42,24 +42,6 @@ def chunkify_dataframe(df, chunk_definition_dict):
 		df_dict[chunk] = df.iloc[nb_to_skip:nb_to_skip + size].copy()
 		nb_to_skip += size
 	return df_dict
-
-def make_vocab_lists(df):
-	usagers_list_freq = df.SORE_USAGER.value_counts()
-	seuil = 10
-	usagers_list_filtre = usagers_list_freq[usagers_list_freq >= seuil].index.tolist()
-	
-	medicaments_list_freq = df['MEDI_NOM'].value_counts()
-	seuil = 10
-	medicaments_list_filtre = medicaments_list_freq[medicaments_list_freq >= seuil].index.tolist()
-
-	fx_list = ['at_saisie1', 'at_saisie2', 'at_fab1', 'at_fab2', 'pharm1', 'pharm2', 'pharmf']
-	stacked = all_features[fx_list].stack(dropna=True)
-	counts = pd.value_counts(stacked)
-	counts = counts.drop('')
-	seuil = 10
-	personnes_filtre = counts[counts >= seuil].index.tolist()
-	
-	return usagers_list_filtre, medicaments_list_filtre, personnes_filtre
 
 def linear_scale(series):
 	min_val = series.min()
@@ -101,27 +83,17 @@ def construct_feature_columns():
 	fait_a_la_fab = tf.feature_column.categorical_column_with_identity(key="fait_a_la_fab", num_buckets=2)
 	oper = tf.feature_column.categorical_column_with_vocabulary_list(key="SORE_CODE_OPER", vocabulary_list=['NO', 'RP'])
 	ORDO_STATUT = tf.feature_column.categorical_column_with_vocabulary_list(key="ORDO_STATUT", vocabulary_list=['H', 'E'])
-	usager = tf.feature_column.categorical_column_with_vocabulary_list(key="SORE_USAGER", vocabulary_list=usagers_list, num_oov_buckets=1)
-	MEDI_NOM = tf.feature_column.categorical_column_with_vocabulary_list(key="MEDI_NOM", vocabulary_list=medicaments_list,num_oov_buckets=1)
-	at_saisie1 = tf.feature_column.categorical_column_with_vocabulary_list('at_saisie1', vocabulary_list=personnes_list,num_oov_buckets=1)
-	at_saisie2 = tf.feature_column.categorical_column_with_vocabulary_list('at_saisie2', vocabulary_list=personnes_list,num_oov_buckets=1)
-	at_fab1 = tf.feature_column.categorical_column_with_vocabulary_list('at_fab1', vocabulary_list=personnes_list,num_oov_buckets=1)
-	at_fab2 = tf.feature_column.categorical_column_with_vocabulary_list('at_fab2', vocabulary_list=personnes_list,num_oov_buckets=1)
-	pharm1 = tf.feature_column.categorical_column_with_vocabulary_list('pharm1', vocabulary_list=personnes_list,num_oov_buckets=1)
-	pharm2 = tf.feature_column.categorical_column_with_vocabulary_list('pharm2', vocabulary_list=personnes_list,num_oov_buckets=1)
-	pharmf = tf.feature_column.categorical_column_with_vocabulary_list('pharmf', vocabulary_list=personnes_list,num_oov_buckets=1)
+	usager = tf.feature_column.categorical_column_with_hash_bucket(key="SORE_USAGER", hash_bucket_size=2)
+	MEDI_NOM = tf.feature_column.categorical_column_with_hash_bucket(key="MEDI_NOM", hash_bucket_size=2)
+	at_saisie1 = tf.feature_column.categorical_column_with_hash_bucket('at_saisie1', hash_bucket_size=2)
+	at_saisie2 = tf.feature_column.categorical_column_with_hash_bucket('at_saisie2', hash_bucket_size=2)
+	at_fab1 = tf.feature_column.categorical_column_with_hash_bucket('at_fab1', hash_bucket_size=2)
+	at_fab2 = tf.feature_column.categorical_column_with_hash_bucket('at_fab2', hash_bucket_size=2)
+	pharm1 = tf.feature_column.categorical_column_with_hash_bucket('pharm1', hash_bucket_size=2)
+	pharm2 = tf.feature_column.categorical_column_with_hash_bucket('pharm2', hash_bucket_size=2)
+	pharmf = tf.feature_column.categorical_column_with_hash_bucket('pharmf', hash_bucket_size=2)
 
 	# layer 2 processed columns
-	embedded_at_saisie1 = tf.feature_column.embedding_column(categorical_column=at_saisie1, dimension=3)
-	embedded_at_saisie2 = tf.feature_column.embedding_column(categorical_column=at_saisie2, dimension=3)
-	embedded_at_fab1 = tf.feature_column.embedding_column(categorical_column=at_fab1, dimension=3)
-	embedded_at_fab2 = tf.feature_column.embedding_column(categorical_column=at_fab2, dimension=3)
-	embedded_pharm1 = tf.feature_column.embedding_column(categorical_column=pharm1, dimension=3)
-	embedded_pharm2 = tf.feature_column.embedding_column(categorical_column=pharm2, dimension=3)
-	embedded_pharmf = tf.feature_column.embedding_column(categorical_column=pharmf, dimension=3)
-	embedded_usager = tf.feature_column.embedding_column(categorical_column=usager, dimension=3)
-
-	embedded_medicament = tf.feature_column.embedding_column(categorical_column=MEDI_NOM, dimension=8)
 
 	indicator_oper = tf.feature_column.indicator_column(categorical_column=oper)
 	indicator_findesemaine = tf.feature_column.indicator_column(categorical_column=fin_de_semaine)
@@ -130,12 +102,22 @@ def construct_feature_columns():
 	indicator_faitalafab = tf.feature_column.indicator_column(categorical_column=fait_a_la_fab)
 	indicator_endroit = tf.feature_column.indicator_column(categorical_column=endroit)
 
+	indicator_usager = tf.feature_column.indicator_column(categorical_column=usager)
+	indicator_MEDI_NOM = tf.feature_column.indicator_column(categorical_column=MEDI_NOM)
+	indicator_at_saisie1 =tf.feature_column.indicator_column(categorical_column=at_saisie1)
+	indicator_at_saisie2 =tf.feature_column.indicator_column(categorical_column=at_saisie2)
+	indicator_at_fab1 = tf.feature_column.indicator_column(categorical_column=at_fab1)
+	indicator_at_fab2 = tf.feature_column.indicator_column(categorical_column=at_fab2)
+	indicator_pharm1 = tf.feature_column.indicator_column(categorical_column=pharm1)
+	indicator_pharm2 = tf.feature_column.indicator_column(categorical_column=pharm2)
+	indicator_pharmf = tf.feature_column.indicator_column(categorical_column=pharmf)
+
 	bucketized_heure = tf.feature_column.bucketized_column(heure_frax, boundaries=get_quantile_based_boundaries(training_examples["heure_frax"], 24))
 	bucketized_chargedetravailsaisie = tf.feature_column.bucketized_column(charge_de_travail_saisie, boundaries=get_quantile_based_boundaries(training_examples['charge_de_travail_saisie'], 4))
 	bucketized_chargedetravailfabounon = tf.feature_column.bucketized_column(charge_de_travail_fabounon, boundaries=get_quantile_based_boundaries(training_examples['charge_de_travail_fabounon'], 4))
 	bucketized_chargedetravailendroit = tf.feature_column.bucketized_column(charge_de_travail_endroit, boundaries=get_quantile_based_boundaries(training_examples['charge_de_travail_endroit'], 4))
 	
-	feature_columns = set([dateheure, bucketized_heure, indicator_soir, indicator_findesemaine, bucketized_chargedetravailendroit, bucketized_chargedetravailfabounon, bucketized_chargedetravailsaisie, embedded_usager, indicator_oper, embedded_medicament, indicator_ordostatut, indicator_faitalafab, indicator_endroit, embedded_at_saisie1, embedded_at_saisie2, embedded_at_fab1, embedded_at_fab2, embedded_pharm1, embedded_pharm2, embedded_pharmf])
+	feature_columns = set([dateheure, bucketized_heure, indicator_soir, indicator_findesemaine, bucketized_chargedetravailendroit, bucketized_chargedetravailfabounon, bucketized_chargedetravailsaisie, indicator_usager, indicator_oper, indicator_MEDI_NOM, indicator_ordostatut, indicator_faitalafab, indicator_endroit, indicator_at_saisie1, indicator_at_saisie2, indicator_at_fab1, indicator_at_fab2, indicator_pharm1, indicator_pharm2, indicator_pharmf])
 	
 	return feature_columns
 	
@@ -302,10 +284,6 @@ if __name__ == '__main__':
 
 	all_targets['delai_cat'] = all_targets['delai'].apply(lambda x: 0 if x < 60 else (1))
 	all_targets = all_targets.drop('delai', axis=1)
-
-	# make vocab lists before processing
-	print('Building vocab lists...')
-	usagers_list, medicaments_list, personnes_list = make_vocab_lists(all_features)
 
 	# Chunkify data
 	print('Chunkifying dataframe...')
