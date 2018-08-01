@@ -19,10 +19,10 @@ targets_file = 'targets.pkl'
 
 chunk_definition_dict = {'training_examples':0.79, 'validation_examples':0.01, 'test_examples':0.20}
 
-learning_rate = 0.01
-batch_size = 5
-epochs = 100
-hu = [30,10]
+learning_rate = 0.00003
+batch_size = 3000
+epochs = 300
+hu = [20,10]
 
 save_dir = '20180731_classifier'
 
@@ -43,23 +43,6 @@ def chunkify_dataframe(df, chunk_definition_dict):
 		nb_to_skip += size
 	return df_dict
 
-def linear_scale(series):
-	min_val = series.min()
-	max_val = series.max()
-	scale = (max_val - min_val) / 2.0
-	return series.apply(lambda x:((x - min_val) / scale) - 1.0)
-
-def log_normalize(series):
-	return series.apply(lambda x:math.log(x+1.0))
-
-def z_score_normalize(series):
-	mean = series.mean()
-	std_dv = series.std()
-	return series.apply(lambda x:(x - mean) / std_dv)
-
-def clip(series, clip_to_min, clip_to_max):
-	return series.apply(lambda x:(min(max(x, clip_to_min), clip_to_max)))
-
 def get_quantile_based_boundaries(feature_values, num_buckets):
 	boundaries = np.arange(1.0, num_buckets) / num_buckets
 	quantiles = feature_values.quantile(boundaries)
@@ -72,7 +55,6 @@ def construct_feature_columns():
 		A set of feature columns
 	""" 
 	# layer 1 input columns
-	dateheure = tf.feature_column.numeric_column("normalized_dateheure")
 	heure_frax = tf.feature_column.numeric_column("heure_frax")
 	charge_de_travail_endroit = tf.feature_column.numeric_column("charge_de_travail_endroit")
 	charge_de_travail_fabounon = tf.feature_column.numeric_column("charge_de_travail_fabounon")
@@ -83,15 +65,15 @@ def construct_feature_columns():
 	fait_a_la_fab = tf.feature_column.categorical_column_with_identity(key="fait_a_la_fab", num_buckets=2)
 	oper = tf.feature_column.categorical_column_with_vocabulary_list(key="SORE_CODE_OPER", vocabulary_list=['NO', 'RP'])
 	ORDO_STATUT = tf.feature_column.categorical_column_with_vocabulary_list(key="ORDO_STATUT", vocabulary_list=['H', 'E'])
-	usager = tf.feature_column.categorical_column_with_hash_bucket(key="SORE_USAGER", hash_bucket_size=2)
-	MEDI_NOM = tf.feature_column.categorical_column_with_hash_bucket(key="MEDI_NOM", hash_bucket_size=2)
-	at_saisie1 = tf.feature_column.categorical_column_with_hash_bucket('at_saisie1', hash_bucket_size=2)
-	at_saisie2 = tf.feature_column.categorical_column_with_hash_bucket('at_saisie2', hash_bucket_size=2)
-	at_fab1 = tf.feature_column.categorical_column_with_hash_bucket('at_fab1', hash_bucket_size=2)
-	at_fab2 = tf.feature_column.categorical_column_with_hash_bucket('at_fab2', hash_bucket_size=2)
-	pharm1 = tf.feature_column.categorical_column_with_hash_bucket('pharm1', hash_bucket_size=2)
-	pharm2 = tf.feature_column.categorical_column_with_hash_bucket('pharm2', hash_bucket_size=2)
-	pharmf = tf.feature_column.categorical_column_with_hash_bucket('pharmf', hash_bucket_size=2)
+	usager = tf.feature_column.categorical_column_with_hash_bucket(key="SORE_USAGER", hash_bucket_size=10)
+	MEDI_NOM = tf.feature_column.categorical_column_with_hash_bucket(key="MEDI_NOM", hash_bucket_size=100)
+	at_saisie1 = tf.feature_column.categorical_column_with_hash_bucket('at_saisie1', hash_bucket_size=10)
+	at_saisie2 = tf.feature_column.categorical_column_with_hash_bucket('at_saisie2', hash_bucket_size=10)
+	at_fab1 = tf.feature_column.categorical_column_with_hash_bucket('at_fab1', hash_bucket_size=10)
+	at_fab2 = tf.feature_column.categorical_column_with_hash_bucket('at_fab2', hash_bucket_size=10)
+	pharm1 = tf.feature_column.categorical_column_with_hash_bucket('pharm1', hash_bucket_size=10)
+	pharm2 = tf.feature_column.categorical_column_with_hash_bucket('pharm2', hash_bucket_size=10)
+	pharmf = tf.feature_column.categorical_column_with_hash_bucket('pharmf', hash_bucket_size=10)
 
 	# layer 2 processed columns
 
@@ -113,11 +95,11 @@ def construct_feature_columns():
 	indicator_pharmf = tf.feature_column.indicator_column(categorical_column=pharmf)
 
 	bucketized_heure = tf.feature_column.bucketized_column(heure_frax, boundaries=get_quantile_based_boundaries(training_examples["heure_frax"], 24))
-	bucketized_chargedetravailsaisie = tf.feature_column.bucketized_column(charge_de_travail_saisie, boundaries=get_quantile_based_boundaries(training_examples['charge_de_travail_saisie'], 4))
-	bucketized_chargedetravailfabounon = tf.feature_column.bucketized_column(charge_de_travail_fabounon, boundaries=get_quantile_based_boundaries(training_examples['charge_de_travail_fabounon'], 4))
-	bucketized_chargedetravailendroit = tf.feature_column.bucketized_column(charge_de_travail_endroit, boundaries=get_quantile_based_boundaries(training_examples['charge_de_travail_endroit'], 4))
+	bucketized_chargedetravailsaisie = tf.feature_column.bucketized_column(charge_de_travail_saisie, boundaries=get_quantile_based_boundaries(training_examples['charge_de_travail_saisie'], 10))
+	bucketized_chargedetravailfabounon = tf.feature_column.bucketized_column(charge_de_travail_fabounon, boundaries=get_quantile_based_boundaries(training_examples['charge_de_travail_fabounon'], 10))
+	bucketized_chargedetravailendroit = tf.feature_column.bucketized_column(charge_de_travail_endroit, boundaries=get_quantile_based_boundaries(training_examples['charge_de_travail_endroit'], 10))
 	
-	feature_columns = set([dateheure, bucketized_heure, indicator_soir, indicator_findesemaine, bucketized_chargedetravailendroit, bucketized_chargedetravailfabounon, bucketized_chargedetravailsaisie, indicator_usager, indicator_oper, indicator_MEDI_NOM, indicator_ordostatut, indicator_faitalafab, indicator_endroit, indicator_at_saisie1, indicator_at_saisie2, indicator_at_fab1, indicator_at_fab2, indicator_pharm1, indicator_pharm2, indicator_pharmf])
+	feature_columns = set([bucketized_heure, indicator_soir, indicator_findesemaine, bucketized_chargedetravailendroit, bucketized_chargedetravailfabounon, bucketized_chargedetravailsaisie, indicator_usager, indicator_oper, indicator_MEDI_NOM, indicator_ordostatut, indicator_faitalafab, indicator_endroit, indicator_at_saisie1, indicator_at_saisie2, indicator_at_fab1, indicator_at_fab2, indicator_pharm1, indicator_pharm2, indicator_pharmf])
 	
 	return feature_columns
 	
@@ -244,7 +226,8 @@ if __name__ == '__main__':
 	# load data
 	print('Loading data...')
 	all_features = pd.read_pickle(features_file)
-	all_features = all_features.drop(['s1'
+	all_features = all_features.drop(['unixdateheure'
+	,'s1'
 	,'s2'
 	,'s3'
 	,'s4'
@@ -277,12 +260,9 @@ if __name__ == '__main__':
 	,'f45'
 	,'f17'], axis = 1)
 
-	all_features['normalized_dateheure'] = linear_scale(all_features['unixdateheure'])
-	all_features = all_features.drop(['unixdateheure'], axis=1)
-
 	all_targets = pd.read_pickle(targets_file)
 
-	all_targets['delai_cat'] = all_targets['delai'].apply(lambda x: 0 if x < 60 else (1))
+	all_targets['delai_cat'] = all_targets['delai'].apply(lambda x: 0 if x < 60 else 1)
 	all_targets = all_targets.drop('delai', axis=1)
 
 	# Chunkify data
