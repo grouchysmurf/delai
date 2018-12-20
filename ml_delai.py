@@ -10,6 +10,7 @@ import tensorflow as tf
 from keras.layers import LSTM, Dense, Dropout
 from keras.models import Sequential
 from keras.preprocessing import sequence
+from keras.utils import multi_gpu_model
 from matplotlib import cm, gridspec
 from matplotlib import pyplot as plt
 from sklearn import metrics
@@ -137,7 +138,7 @@ class keras_model:
 		logging.info('Scoring keras model: multilayer perceptron...')
 		score = model.evaluate(self.X_test, self.y_test, batch_size=4096)
 		logging.info('Score of multilayer perceptron on test set is: {}'.format(score[1]))
-		return model, score
+		model.save('mlp.h5')
 
 	def lstm(self, batch_size, time_steps):
 		input_dim = self.X_train.shape[1]
@@ -146,19 +147,20 @@ class keras_model:
 		model.add(LSTM(128, input_shape=(time_steps, input_dim)))
 		model.add(Dropout(0.5))
 		model.add(Dense(1, activation='sigmoid'))
+		parallel_model = multi_gpu_model(model,gpus=4)
 
-		model.compile(loss='binary_crossentropy',
+		parallel_model.compile(loss='binary_crossentropy',
 					optimizer='Adam',
 					metrics=['accuracy'])
 
 		logging.info('Training keras model: LSTM...')
 		train_seq = sequence.TimeseriesGenerator(self.X_train, self.y_train, length=time_steps, batch_size=batch_size)
-		model.fit_generator(train_seq, epochs=20)
+		parallel_model.fit_generator(train_seq, epochs=20)
 		logging.info('Scoring keras model: LSTM...')
 		test_seq = sequence.TimeseriesGenerator(self.X_test, self.y_test, length=time_steps, batch_size=batch_size)
-		score = model.evaluate_generator(test_seq)
+		score = parallel_model.evaluate_generator(test_seq)
 		logging.info('Score of LSTM on test set is: {}'.format(score[1]))
-		return model, score
+		model.save('lstm.h5')
 
 
 ####################
@@ -182,4 +184,4 @@ if __name__ == '__main__':
 
 	X_train, X_test, y_train, y_test = data().split()
 	X_train, X_test, y_train, y_test = skl_model(X_train, X_test, y_train, y_test).prepare_data()
-	model, score = keras_model(X_train, X_test, y_train, y_test).lstm(5, 32)
+	keras_model(X_train, X_test, y_train, y_test).lstm(5, 32)
