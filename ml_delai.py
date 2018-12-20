@@ -38,7 +38,7 @@ class data:
 
 	def split(self):		
 		logging.info('Splitting dataframes into train and test sets...')
-		X_train, X_test, y_train, y_test = train_test_split(self.all_features, self.all_targets, train_size=0.01, test_size=0.002)
+		X_train, X_test, y_train, y_test = train_test_split(self.all_features, self.all_targets, train_size=0.8, test_size=0.2)
 		logging.debug('Split done.')
 		return X_train, X_test, y_train, y_test
 
@@ -148,12 +148,12 @@ class keras_model:
 		model.add(Dense(1, activation='sigmoid'))
 
 		model.compile(loss='binary_crossentropy',
-					optimizer='rmsprop',
+					optimizer='Adam',
 					metrics=['accuracy'])
 
 		logging.info('Training keras model: LSTM...')
 		train_seq = sequence.TimeseriesGenerator(self.X_train, self.y_train, length=time_steps, batch_size=batch_size)
-		model.fit_generator(train_seq, epochs=1)
+		model.fit_generator(train_seq, epochs=20)
 		logging.info('Scoring keras model: LSTM...')
 		test_seq = sequence.TimeseriesGenerator(self.X_test, self.y_test, length=time_steps, batch_size=batch_size)
 		score = model.evaluate_generator(test_seq)
@@ -182,4 +182,4 @@ if __name__ == '__main__':
 
 	X_train, X_test, y_train, y_test = data().split()
 	X_train, X_test, y_train, y_test = skl_model(X_train, X_test, y_train, y_test).prepare_data()
-	model, score = keras_model(X_train, X_test, y_train, y_test).lstm(5, 4096)
+	model, score = keras_model(X_train, X_test, y_train, y_test).lstm(5, 32)
