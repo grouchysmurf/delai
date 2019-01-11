@@ -1,8 +1,8 @@
-features.pkl
-helper.py
-ml_delai.code-workspace
-ml_delai.csv
-predictions.txt
-targets.pkl
-.vscode
+data
+model
 logs
+.vscode
+ml_delai.code-workspace
+logs
+mlp.h5
+__pycache__/confusion_matrix_pretty_print.cpython-36.pyc
