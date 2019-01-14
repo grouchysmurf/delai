@@ -4,121 +4,45 @@ import numpy as np
 import pandas as pd
 
 ####################
-#### TWEAKABLES ####
-####################
-
-datafile = 'data/traintest.csv'
-
-selected_features = [
-	 'date_oper'
-	,'heure_oper'
-	,'soir'
-	,'fin_de_semaine'
-	,'SORE_USAGER'
-	,'SORE_CODE_OPER'
-	,'MEDI_NOM'
-	,'ORDO_STATUT'
-	,'endroit'
-	,'s1'
-	,'s2'
-	,'s3'
-	,'s4'
-	,'s5'
-	,'s6'
-	,'s7'
-	,'s8'
-	,'s9'
-	,'f'
-	,'d1'
-	,'d2'
-	,'d3'
-	,'d4'
-	,'d5'
-	,'d7'
-	,'d8'
-	,'d10'
-	,'d11'
-	,'d12'
-	,'d18'
-	,'f1'
-	,'f2'
-	,'f4'
-	,'f5'
-	,'f6'
-	,'f7'
-	,'f8'
-	,'f11'
-	,'f12'
-	,'f45'
-	,'f17'
-	]
-
-selected_targets = [
-	 'delai'
-	 ]
-
-pd.options.display.max_rows = 20
-pd.options.display.float_format = '{:.1f}'.format
-
-####################
 #### FUNCTIONS #####
 ####################
 
-def preprocess_features(ml_dataframe):  
+def preprocess_features(restrict_data):  
+	
+	datafile = 'data/traintest.csv'
+
+	selected_targets = [
+		'delai'
+		]
+	
+	print('Reading CSV....')
+	ml_dataframe = pd.read_csv(datafile, sep=',')
+	if restrict_data == True:
+		ml_dataframe = ml_dataframe.sample(n=1000)
 
 	# Create synthetic features.
 	print('Calculating synthetic features...')
 	print('1. Calculating dates and times...')
-	ml_dataframe['dateheure'] = pd.to_datetime(ml_dataframe['date_oper'].astype(str)+' '+ml_dataframe['heure_oper'].astype(str), format='%Y%m%d %H:%M')
-	ml_dataframe['heure_frax'] = ml_dataframe['heure_oper'].str.slice(start=0, stop=2).astype(np.float) + ml_dataframe['heure_oper'].str.slice(start=3, stop=5).astype(np.float)/60
-	ml_dataframe = ml_dataframe.drop(ml_dataframe[ml_dataframe.dateheure < np.datetime64('2018-01-01')].index)
+	ml_dataframe['datetime'] = pd.to_datetime(ml_dataframe['date_oper'].astype(str)+' '+ml_dataframe['heure_oper'].astype(str), format='%Y%m%d %H:%M')
+	ml_dataframe['time_frax'] = ml_dataframe['heure_oper'].str.slice(start=0, stop=2).astype(np.float) + ml_dataframe['heure_oper'].str.slice(start=3, stop=5).astype(np.float)/60
 	processed_targets = pd.DataFrame()
 	processed_targets[selected_targets] = ml_dataframe[selected_targets]
-	processed_features = ml_dataframe.drop('delai', axis=1)
+	processed_features = ml_dataframe.drop(selected_targets, axis=1)
 
 	print('2. Calculating locations...')
-	processed_features['fait_a_la_fab'] = processed_features['endroit'].apply(lambda x: 1 if x > 0 else 0)
+	processed_features['compounding'] = processed_features['endroit'].apply(lambda x: 1 if x > 0 else 0)
 
-	print('3. Calculating workload...')
-	print('a. Calculating location specific workload... (takes a while...)')
-	processed_features['charge_de_travail_endroit'] = processed_features.apply(lambda x: sum(((processed_features['dateheure'] <= x.dateheure) & (processed_features['dateheure'] > (x.dateheure - datetime.timedelta(minutes=90))) & (processed_features['endroit'] == x.endroit))), axis=1)
-	print('b. Calculating compounding vs dispensing workload... (takes a while...)')
-	processed_features['charge_de_travail_fabounon'] = processed_features.apply(lambda x: sum(((processed_features['dateheure'] <= x.dateheure) & (processed_features['dateheure'] > (x.dateheure - datetime.timedelta(minutes=90))) & (processed_features['endroit'] > 0))) if x.endroit > 0 else sum(((processed_features['dateheure'] <= x.dateheure) & (processed_features['dateheure'] > (x.dateheure - datetime.timedelta(minutes=90))))), axis=1)
-	print('c. Calculating order processing workload... (takes a while...)')
-	processed_features['charge_de_travail_saisie'] = processed_features.apply(lambda x: sum(((processed_features['dateheure'] <= x.dateheure) & (processed_features['dateheure'] > (x.dateheure - datetime.timedelta(minutes=90))))), axis=1)
-	
 	# Remove stuff tensorflow can't use (datetimes)
-	processed_features = processed_features.drop(['dateheure', 'date_oper', 'heure_oper'], axis=1)
+	processed_features = processed_features.drop(['datetime', 'date_oper', 'heure_oper'], axis=1)
 
-	print('5. Stripping strings...')
+	print('3. Stripping strings...')
 	processed_features = processed_features.applymap(lambda x:x.strip() if type(x) is str else x)
 
+	print('4. Renaming variables...')
+	features_rename_dict = {'MEDI_NOM':'drug_name', 'SORE_USAGER':'user', 'SORE_CODE_OPER':'operation_code', 'ORDO_STATUT':'internal_or_external', 'endroit':'workbench', 's1':'pharm_disp_1' ,'s2':'pharm_disp_2', 's3':'pharm_disp_3', 's4':'pharm_disp_4', 's5':'pharm_disp_5', 's6':'pharm_disp_6', 's7':'pharm_disp_7', 's8':'pharm_disp_8', 's9':'pharm_disp_9', 'f':'pharm_comp', 'd1':'tech_disp_1', 'd2':'tech_disp_2', 'd3':'tech_disp_3', 'd4':'tech_disp_4', 'd5':'tech_disp_5', 'd7':'tech_disp_7', 'd8':'tech_disp_8', 'd10':'tech_disp_10', 'd11':'tech_disp_11', 'd12':'tech_disp_12', 'd18':'tech_disp_18', 'f1':'tech_comp_1', 'f2':'tech_comp_2', 'f4':'tech_comp_4', 'f5':'tech_comp_5', 'f6':'tech_comp_6', 'f7':'tech_comp_7', 'f8':'tech_comp_8', 'f11':'tech_comp_11', 'f12':'tech_comp_12', 'f45':'tech_comp_45', 'f17':'tech_comp_17', 'soir':'evening', 'fin_de_semaine':'weekend_holiday', 'fait_a_la_fab':'compounding'}
+	targets_rename_dict = {'delai': 'delay'}
+
+	processed_features = processed_features.rename(index=str, columns=features_rename_dict)
+	processed_targets = processed_targets.rename(index=str, columns=targets_rename_dict)
+
 	return processed_features, processed_targets
-
-####################
-##### EXECUTE ######
-####################
-
-if __name__ == '__main__':
-
-	print('Reading CSV....')
-	ml_delai_dataframe = pd.read_csv(datafile, sep=',')
-
-	print('Processing features and targets...')
-	processed_features, processed_targets = preprocess_features(ml_delai_dataframe)
-
-	print('Processed features summary:')
-	print(processed_features.describe())
-	print(processed_features.head())
-	print('Saving features...')
-	processed_features.to_pickle('data/features.pkl')
-
-	print('Processed targets summary:')
-	print(processed_targets.describe())
-	print(processed_targets.head())
-	print('Saving targets...')
-	processed_targets.to_pickle('data/targets.pkl')
-
-	correlation_data = pd.concat([processed_features, processed_targets], axis=1, sort=False)
-	print('Correlation matrix:')
-	print(correlation_data.corr())
