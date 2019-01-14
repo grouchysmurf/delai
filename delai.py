@@ -174,7 +174,7 @@ if __name__ == '__main__':
 	logging.debug('Logger successfully configured.')
 
 	logging.debug('Obtaining data...')
-	features, targets = data(restrict_data=True).get_data()
+	features, targets = data(restrict_data=False).get_data()
 	s = skl_model(save_timestamp)
 	logging.debug('Splitting train and test sets...')
 	features_train, features_test, targets_train, targets_test = s.get_split_data(features, targets)
