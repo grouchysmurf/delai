@@ -32,7 +32,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.feature_selection import SelectFromModel
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import f1_score, precision_recall_curve, roc_auc_score
+from sklearn.metrics import f1_score, precision_recall_curve, roc_auc_score, accuracy_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import KBinsDiscretizer, LabelEncoder, OneHotEncoder, StandardScaler
@@ -64,10 +64,10 @@ class keras_model:
 
 		with tf.device('/cpu:0'):
 			model = Sequential()
-			model.add(Dense(128, activation='relu'))
-			model.add(Dropout(0.5))
-			model.add(Dense(128, activation='relu'))
-			model.add(Dropout(0.5))
+			model.add(Dense(1024, activation='relu'))
+			model.add(Dropout(0.2))
+			model.add(Dense(32, activation='relu'))
+			model.add(Dropout(0.2))
 			model.add(Dense(1, activation='sigmoid'))
 
 		if len(K.tensorflow_backend._get_available_gpus()) > 1:
@@ -119,14 +119,14 @@ class skl_model:
 	def features_encoding_pipe(self):
 		features = []
 
-		string_columns_to_one_hot = ['drug_name', 'user', 'operation_code', 'internal_or_external', 'workbench', 'pharm_disp_1' ,'pharm_disp_2', 'pharm_disp_3', 'pharm_disp_4', 'pharm_disp_5', 'pharm_disp_6', 'pharm_disp_7', 'pharm_disp_8', 'pharm_disp_9', 'pharm_comp', 'tech_disp_1', 'tech_disp_2', 'tech_disp_3', 'tech_disp_4', 'tech_disp_5', 'tech_disp_7', 'tech_disp_8', 'tech_disp_10', 'tech_disp_11', 'tech_disp_12', 'tech_disp_18', 'tech_comp_1', 'tech_comp_2', 'tech_comp_4', 'tech_comp_5', 'tech_comp_6', 'tech_comp_7', 'tech_comp_8', 'tech_comp_11', 'tech_comp_12', 'tech_comp_45', 'tech_comp_17', 'weekend_holiday']
+		string_columns_to_one_hot = ['drug_name', 'user', 'operation_code', 'internal_or_external', 'workbench', 'pharm_disp_1' ,'pharm_disp_2', 'pharm_disp_3', 'pharm_disp_4', 'pharm_disp_5', 'pharm_disp_6', 'pharm_disp_7', 'pharm_disp_8', 'pharm_disp_9', 'pharm_comp', 'tech_disp_1', 'tech_disp_2', 'tech_disp_3', 'tech_disp_4', 'tech_disp_5', 'tech_disp_7', 'tech_disp_8', 'tech_disp_10', 'tech_disp_11', 'tech_disp_12', 'tech_disp_18', 'tech_comp_1', 'tech_comp_2', 'tech_comp_4', 'tech_comp_5', 'tech_comp_6', 'tech_comp_7', 'tech_comp_8', 'tech_comp_11', 'tech_comp_12', 'tech_comp_45', 'tech_comp_17']
 
 		continuous_columns_to_bin = ['time_frax']
 
 		continuous_columns_to_scale = ['workload']
 
 		features.append(('string_columns', self.one_hot_pipe(), string_columns_to_one_hot))
-		features.append(('continuous_columns_binned', self.n_bin_pipe(16), continuous_columns_to_bin))
+		features.append(('continuous_columns_binned', self.n_bin_pipe(16), continuous_columns_to_bin)) # open 16 hours a deay
 		features.append(('continuous_columns_scaled', self.scaler_pipe(), continuous_columns_to_scale))
 
 		col_transformer_features = ColumnTransformer(transformers=features)
@@ -136,7 +136,7 @@ class skl_model:
 		pipe = LabelEncoder()
 		return pipe
 	
-	def processing_pipe(self):
+	def processing_pipe(self, mode):
 
 		tb_callback = TensorBoard(log_dir=os.path.join(self.keras_save_path, 'tensorboard_logs'))
 		checkpoint_callback = ModelCheckpoint(filepath=os.path.join(self.keras_save_path, save_timestamp + 'checkpoints'), verbose=1)
@@ -145,12 +145,17 @@ class skl_model:
 
 		keras_build_fn = keras_model().define_model
 
-		pipeline = Pipeline([
+		steps = [
 			('features_encoding', self.features_encoding_pipe()),
 			('feature_selection', SelectFromModel(ExtraTreesClassifier(n_estimators=100, n_jobs=-2, verbose=1))),
-			('multilayer_perceptron', KerasClassifier(build_fn=keras_build_fn, 
-					callbacks=[tb_callback, checkpoint_callback, earlystop_callback, csv_callback])),
-		])
+		]
+
+		if mode == 'mlp':
+			steps.append(('trees', ExtraTreesClassifier(n_estimators=10000, n_jobs=-2, verbose=1)))
+		elif mode =='ert':
+			steps.append(('multilayer_perceptron', KerasClassifier(build_fn=keras_build_fn, callbacks=[tb_callback, checkpoint_callback, earlystop_callback, csv_callback], batch_size=256, epochs=100)))
+		
+		pipeline = Pipeline(steps)
 
 		return pipeline
 
@@ -162,8 +167,10 @@ class skl_model:
 if __name__ == '__main__':
 
 	parser = ap.ArgumentParser(description='Try to classify the time required to prepare medications as <45 minutes (short) or > 45 minutes (long)', formatter_class=ap.RawTextHelpFormatter)
+	parser.add_argument('--mode', metavar='Type_String', type=str, nargs="?", default='mlp', help='Use "mlp" to train a multilayer perceptron binary classifier, "ert" to train an extremly randomized trees classifier.')
 
 	args = parser.parse_args()
+	mode = args.mode
 
 	save_timestamp = datetime.now().strftime('%Y%m%d-%H%M')
 
@@ -183,7 +190,7 @@ if __name__ == '__main__':
 	logging.debug('Logger successfully configured.')
 
 	logging.debug('Obtaining data...')
-	features, targets = data(restrict_data=True).get_data()
+	features, targets = data(restrict_data=False).get_data()
 	s = skl_model(save_timestamp)
 	logging.debug('Splitting train and test sets...')
 	features_train, features_test, targets_train, targets_test = s.get_split_data(features, targets)
@@ -191,14 +198,15 @@ if __name__ == '__main__':
 	le = s.targets_pipe()
 	y_train = le.fit_transform(targets_train['delay_cat'])
 	y_true = le.transform(targets_test['delay_cat'])
-	pipe = s.processing_pipe()
+	pipe = s.processing_pipe(mode)
 	logging.debug('Fitting model...')
-	pipe.fit(features_train, y_train, multilayer_perceptron__batch_size=256, multilayer_perceptron__epochs=100)
+	pipe.fit(features_train, y_train)
 	y_pred = pipe.predict(features_test)
 	y_probas = pipe.predict_proba(features_test)
 	
 	logging.debug('Calculating metrics...')
-
+	acc = accuracy_score(y_true, y_pred)
+	logging.info('Accuracy of model on test set is: {}'.format(acc))
 	f1 = f1_score(y_true, y_pred)
 	logging.info('F1 Score of model on test set is: {}:'.format(f1))
 	auroc = roc_auc_score(y_true, y_probas[:,1])

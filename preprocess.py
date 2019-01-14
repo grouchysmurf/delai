@@ -18,7 +18,7 @@ def preprocess_features(restrict_data):
 	print('Reading CSV....')
 	ml_dataframe = pd.read_csv(datafile, sep=',', index_col=False)
 	if restrict_data == True:
-		ml_dataframe = ml_dataframe[:10000]
+		ml_dataframe = ml_dataframe[-50000:]
 
 	# Create synthetic features.
 	print('Calculating synthetic features...')
@@ -35,7 +35,7 @@ def preprocess_features(restrict_data):
 	processed_features['compounding'] = processed_features['endroit'].apply(lambda x: 1 if x > 0 else 0)
 
 	print('3. Calculating workload...')
-	processed_features['workload'] = processed_features['SORE_NOAUTO'].rolling(window='3600s').count()
+	processed_features['workload'] = processed_features['SORE_NOAUTO'].rolling(window='2700s').count()
 
 	# Remove stuff tensorflow can't use (datetimes)
 	processed_features = processed_features.drop(['date_oper', 'heure_oper'], axis=1)
