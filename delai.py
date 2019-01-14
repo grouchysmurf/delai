@@ -35,7 +35,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.metrics import f1_score, precision_recall_curve, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import KBinsDiscretizer, LabelEncoder, OneHotEncoder
+from sklearn.preprocessing import KBinsDiscretizer, LabelEncoder, OneHotEncoder, StandardScaler
 
 import preprocess
 import scikitplot as skplt
@@ -110,15 +110,24 @@ class skl_model:
 		])
 		return pipe
 
+	def scaler_pipe(self):
+		pipe = Pipeline([
+			('scaler', StandardScaler())
+		])
+		return pipe
+
 	def features_encoding_pipe(self):
 		features = []
 
-		string_columns_to_one_hot = ['drug_name', 'user', 'operation_code', 'internal_or_external', 'workbench', 'pharm_disp_1' ,'pharm_disp_2', 'pharm_disp_3', 'pharm_disp_4', 'pharm_disp_5', 'pharm_disp_6', 'pharm_disp_7', 'pharm_disp_8', 'pharm_disp_9', 'pharm_comp', 'tech_disp_1', 'tech_disp_2', 'tech_disp_3', 'tech_disp_4', 'tech_disp_5', 'tech_disp_7', 'tech_disp_8', 'tech_disp_10', 'tech_disp_11', 'tech_disp_12', 'tech_disp_18', 'tech_comp_1', 'tech_comp_2', 'tech_comp_4', 'tech_comp_5', 'tech_comp_6', 'tech_comp_7', 'tech_comp_8', 'tech_comp_11', 'tech_comp_12', 'tech_comp_45', 'tech_comp_17', 'evening', 'weekend_holiday', 'compounding']
+		string_columns_to_one_hot = ['drug_name', 'user', 'operation_code', 'internal_or_external', 'workbench', 'pharm_disp_1' ,'pharm_disp_2', 'pharm_disp_3', 'pharm_disp_4', 'pharm_disp_5', 'pharm_disp_6', 'pharm_disp_7', 'pharm_disp_8', 'pharm_disp_9', 'pharm_comp', 'tech_disp_1', 'tech_disp_2', 'tech_disp_3', 'tech_disp_4', 'tech_disp_5', 'tech_disp_7', 'tech_disp_8', 'tech_disp_10', 'tech_disp_11', 'tech_disp_12', 'tech_disp_18', 'tech_comp_1', 'tech_comp_2', 'tech_comp_4', 'tech_comp_5', 'tech_comp_6', 'tech_comp_7', 'tech_comp_8', 'tech_comp_11', 'tech_comp_12', 'tech_comp_45', 'tech_comp_17', 'weekend_holiday']
 
 		continuous_columns_to_bin = ['time_frax']
 
+		continuous_columns_to_scale = ['workload']
+
 		features.append(('string_columns', self.one_hot_pipe(), string_columns_to_one_hot))
 		features.append(('continuous_columns_binned', self.n_bin_pipe(16), continuous_columns_to_bin))
+		features.append(('continuous_columns_scaled', self.scaler_pipe(), continuous_columns_to_scale))
 
 		col_transformer_features = ColumnTransformer(transformers=features)
 		return col_transformer_features
