@@ -151,7 +151,7 @@ class skl_model:
 		]
 
 		if mode == 'mlp':
-			steps.append(('trees', ExtraTreesClassifier(n_estimators=10000, n_jobs=-2, verbose=1)))
+			steps.append(('trees', ExtraTreesClassifier(n_estimators=1000, n_jobs=-2, verbose=1)))
 		elif mode =='ert':
 			steps.append(('multilayer_perceptron', KerasClassifier(build_fn=keras_build_fn, callbacks=[tb_callback, checkpoint_callback, earlystop_callback, csv_callback], batch_size=256, epochs=100)))
 		
@@ -168,9 +168,11 @@ if __name__ == '__main__':
 
 	parser = ap.ArgumentParser(description='Try to classify the time required to prepare medications as <45 minutes (short) or > 45 minutes (long)', formatter_class=ap.RawTextHelpFormatter)
 	parser.add_argument('--mode', metavar='Type_String', type=str, nargs="?", default='mlp', help='Use "mlp" to train a multilayer perceptron binary classifier, "ert" to train an extremly randomized trees classifier.')
+	parser.add_argument('--logging_level', metavar='Type_String', type=str, nargs="?", default='info', help='Logging level. Possibilities include "debug" or "info". Metrics are logged with info level, setting level above info will prevent metrics logging.')
 
 	args = parser.parse_args()
 	mode = args.mode
+	logging_level = args.logging_level
 
 	save_timestamp = datetime.now().strftime('%Y%m%d-%H%M')
 
@@ -178,16 +180,24 @@ if __name__ == '__main__':
 	print('Configuring logger...')
 
 	# Logger
+	if logging_level == 'info':
+		ll = logging.INFO
+	elif logging_level =='debug':
+		ll = logging.DEBUG
+	elif logging_level == 'warning':
+		ll = logging.WARNING
 	logging_path = os.path.join(os.getcwd(), 'logs', 'build_model')
 	pathlib.Path(logging_path).mkdir(parents=True, exist_ok=True)
 	logging.basicConfig(
-		level=logging.DEBUG,
+		level=ll,
 		format="%(asctime)s [%(levelname)s]  %(message)s",
 		handlers=[
 			logging.FileHandler(os.path.join(logging_path, save_timestamp + '.log')),
 			logging.StreamHandler()
 		])
 	logging.debug('Logger successfully configured.')
+	if logging_level == 'warning':
+		logging.warning('Logging level is set at WARNING. Metrics are logged at level INFO. Metrics will not be logged.')
 
 	logging.debug('Obtaining data...')
 	features, targets = data(restrict_data=False).get_data()
