@@ -183,7 +183,7 @@ if __name__ == '__main__':
 	logging.debug('Logger successfully configured.')
 
 	logging.debug('Obtaining data...')
-	features, targets = data(restrict_data=False).get_data()
+	features, targets = data(restrict_data=True).get_data()
 	s = skl_model(save_timestamp)
 	logging.debug('Splitting train and test sets...')
 	features_train, features_test, targets_train, targets_test = s.get_split_data(features, targets)
@@ -211,5 +211,5 @@ if __name__ == '__main__':
 	skplt.metrics.plot_precision_recall(y_true, y_probas)
 	plt.savefig(os.path.join('model', save_timestamp + 'precision_recall_curve.png'))
 
-	skplt.estimators.plot_feature_importances(pipe.named_steps['feature_selection'].estimator_)
+	skplt.estimators.plot_feature_importances(pipe.named_steps['feature_selection'].estimator_, x_tick_rotation=45)
 	plt.savefig(os.path.join('model', save_timestamp + 'feature_importance.png'))
