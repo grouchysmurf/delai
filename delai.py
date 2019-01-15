@@ -35,7 +35,7 @@ from sklearn.feature_selection import SelectFromModel
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import (accuracy_score, f1_score, make_scorer,
                              precision_recall_curve, roc_auc_score)
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import (KBinsDiscretizer, LabelEncoder,
                                    OneHotEncoder, StandardScaler)
@@ -86,13 +86,11 @@ class keras_model:
 
 class skl_model:
 
-	def __init__(self, save_timestamp):
+	def __init__(self):
 		self.skl_save_path = os.path.join(os.getcwd(), 'model')
 		pathlib.Path(self.skl_save_path).mkdir(parents=True, exist_ok=True)
 		self.keras_save_path = os.path.join(os.getcwd(), 'model')
 		pathlib.Path(self.keras_save_path).mkdir(parents=True, exist_ok=True)
-		self.save_timestamp = save_timestamp
-
 
 	def get_split_data(self, features, targets):
 		features_train, features_test, targets_train, targets_test = train_test_split(features, targets)
@@ -164,7 +162,7 @@ class operation_mode:
 	def single_train(self, save_timestamp, features, targets):
 
 		logging.info('Performing single train...')
-		s = skl_model(save_timestamp)
+		s = skl_model()
 		logging.debug('Splitting train and test sets...')
 		features_train, features_test, targets_train, targets_test = s.get_split_data(features, targets)
 		logging.debug('Preparing targets...')
@@ -199,12 +197,12 @@ class operation_mode:
 
 		logging.info('Performing plotting of learning curve...')
 
-		s = skl_model(save_timestamp)
+		s = skl_model()
 		le = s.targets_pipe()
 		y = le.fit_transform(targets['delay_cat'])
 		pipe = s.processing_pipe(self.mode)
 
-		skplt.estimators.plot_learning_curve(pipe, features, y, title='Learning Curve', cv=5, scoring=make_scorer(accuracy_score))
+		skplt.estimators.plot_learning_curve(pipe, features, y, title='Learning Curve', cv=StratifiedKFold(shuffle=True, n_splits=5), scoring='accuracy')
 		plt.savefig(os.path.join('model', save_timestamp + 'learning_curve.png'))
 
 
@@ -217,7 +215,7 @@ if __name__ == '__main__':
 	parser = ap.ArgumentParser(description='Try to classify the time required to prepare medications as <45 minutes (short) or > 45 minutes (long)', formatter_class=ap.RawTextHelpFormatter)
 	parser.add_argument('--logging_level', metavar='Type_String', type=str, nargs="?", default='info', help='Logging level. Possibilities include "debug" or "info". Metrics are logged with info level, setting level above info will prevent metrics logging.')
 	parser.add_argument('--mode', metavar='Type_String', type=str, nargs="?", default='ert', help='Use "mlp" to train a multilayer perceptron binary classifier, "ert" to train an extremly randomized trees classifier.')
-	parser.add_argument('--op', metavar='Type_string', type=str, nargs='?', default='single_train', help='Use "st" to perform a single training pass. Use "lc" to plot a learning curve with cross validation.')
+	parser.add_argument('--op', metavar='Type_string', type=str, nargs='?', default='st', help='Use "st" to perform a single training pass. Use "lc" to plot a learning curve with cross validation.')
 	parser.add_argument('--restrict_data', action='store_true', help='Use this argument to restrict the number of data lines used (for testing.')
 
 	args = parser.parse_args()
@@ -255,6 +253,7 @@ if __name__ == '__main__':
 	
 	logging.debug('Obtaining data...')
 	features, targets = data(restrict_data=restrict_data).get_data()
+	logging.debug('Obtained {} samples for features and {} samples for targets'.format(len(features), len(targets)))
 
 	o = operation_mode(mode)
 	if op == 'st':
