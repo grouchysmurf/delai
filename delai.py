@@ -51,9 +51,11 @@ class data:
 	def __init__(self, restrict_data=False):
 		# load data
 		self.features, self.targets = preprocess.preprocess_features(restrict_data)
-		self.targets['delay_cat'] = self.targets['delay'].apply(lambda x: 0 if x < 45 else 1)
+		# categorize
+		self.targets['delay_cat'] = self.targets['delay'].apply(lambda x: 0 if x < 45 else 1)  # ADJUST CUTOFF HERE
 
 	def get_data(self):
+		# return the data
 		return self.features, self.targets
 
 
@@ -64,6 +66,7 @@ class keras_model:
 
 	def define_model(self):
 
+		# basic multilayer perceptron
 		with tf.device('/cpu:0'):
 			model = Sequential()
 			model.add(Dense(1024, activation='relu'))
@@ -72,11 +75,13 @@ class keras_model:
 			model.add(Dropout(0.2))
 			model.add(Dense(1, activation='sigmoid'))
 
+		# check if gpu
 		if len(K.tensorflow_backend._get_available_gpus()) > 1:
 			ondevice_model = multi_gpu_model(model, gpus=len(K.tensorflow_backend._get_available_gpus()))
 		else:
 			ondevice_model = model
 
+		# compile the model
 		ondevice_model.compile(loss='binary_crossentropy',
 					optimizer='Adam',
 					metrics=['binary_accuracy'])
@@ -87,12 +92,14 @@ class keras_model:
 class skl_model:
 
 	def __init__(self):
+		# make sure directories required to save everything exist, if not create them
 		self.skl_save_path = os.path.join(os.getcwd(), 'model')
 		pathlib.Path(self.skl_save_path).mkdir(parents=True, exist_ok=True)
 		self.keras_save_path = os.path.join(os.getcwd(), 'model')
 		pathlib.Path(self.keras_save_path).mkdir(parents=True, exist_ok=True)
 
 	def get_split_data(self, features, targets):
+		# perform a train-test split on the input data
 		features_train, features_test, targets_train, targets_test = train_test_split(features, targets)
 		return features_train, features_test, targets_train, targets_test
 	
@@ -105,50 +112,62 @@ class skl_model:
 		return pipe
 
 	def n_bin_pipe(self, n):
+		# discretize a continuous variable in a specified number of bins
 		pipe = Pipeline([
 			('bin', KBinsDiscretizer(n_bins=n)),
 		])
 		return pipe
 
 	def scaler_pipe(self):
+		# scale a continuous variable
 		pipe = Pipeline([
 			('scaler', StandardScaler())
 		])
 		return pipe
 
 	def features_encoding_pipe(self):
+		# encode features
+
 		features = []
 
-		string_columns_to_one_hot = ['drug_name', 'user', 'operation_code', 'internal_or_external', 'workbench', 'pharm_disp_1' ,'pharm_disp_2', 'pharm_disp_3', 'pharm_disp_4', 'pharm_disp_5', 'pharm_disp_6', 'pharm_disp_7', 'pharm_disp_8', 'pharm_disp_9', 'pharm_comp', 'tech_disp_1', 'tech_disp_2', 'tech_disp_3', 'tech_disp_4', 'tech_disp_5', 'tech_disp_7', 'tech_disp_8', 'tech_disp_10', 'tech_disp_11', 'tech_disp_12', 'tech_disp_18', 'tech_comp_1', 'tech_comp_2', 'tech_comp_4', 'tech_comp_5', 'tech_comp_6', 'tech_comp_7', 'tech_comp_8', 'tech_comp_11', 'tech_comp_12', 'tech_comp_45', 'tech_comp_17']
+		# adjust columns with data provided by preprocess.py
+
+		string_columns_to_one_hot = ['drug_id', 'user', 'operation_code', 'internal_or_external', 'workbench', 'pharm_disp_1' ,'pharm_disp_2', 'pharm_disp_3', 'pharm_disp_4', 'pharm_disp_5', 'pharm_disp_6', 'pharm_disp_7', 'pharm_disp_8', 'pharm_disp_9', 'pharm_comp', 'tech_disp_1', 'tech_disp_2', 'tech_disp_3', 'tech_disp_4', 'tech_disp_5', 'tech_disp_7', 'tech_disp_8', 'tech_disp_10', 'tech_disp_11', 'tech_disp_12', 'tech_disp_18', 'tech_comp_1', 'tech_comp_2', 'tech_comp_4', 'tech_comp_5', 'tech_comp_6', 'tech_comp_7', 'tech_comp_8', 'tech_comp_11', 'tech_comp_12', 'tech_comp_45', 'tech_comp_17']
 
 		continuous_columns_to_bin = ['time_frax']
 
 		continuous_columns_to_scale = ['workload']
 
+		# build the transformers for the column transformer
 		features.append(('string_columns', self.one_hot_pipe(), string_columns_to_one_hot))
-		features.append(('continuous_columns_binned', self.n_bin_pipe(16), continuous_columns_to_bin)) # open 16 hours a deay
+		features.append(('continuous_columns_binned', self.n_bin_pipe(16), continuous_columns_to_bin)) # open 16 hours a day, adjust as needed
 		features.append(('continuous_columns_scaled', self.scaler_pipe(), continuous_columns_to_scale))
 
+		# build the column transformer
 		col_transformer_features = ColumnTransformer(transformers=features)
 		return col_transformer_features
 
 	def targets_pipe(self):
+		# encode labels
 		pipe = LabelEncoder()
 		return pipe
 	
 	def processing_pipe(self, mode):
 
+		# get the keras model build function
 		keras_build_fn = keras_model().define_model
 
+		# base steps
 		steps = [
 			('features_encoding', self.features_encoding_pipe()),
 			('feature_selection', SelectFromModel(ExtraTreesClassifier(n_estimators=100, n_jobs=-2, verbose=1))),
 		]
 
+		# adjust final step based on desired mode
 		if mode == 'ert':
-			steps.append(('trees', ExtraTreesClassifier(n_estimators=100, n_jobs=-2, verbose=1)))
+			steps.append(('trees', ExtraTreesClassifier(n_estimators=100, n_jobs=-2, verbose=1))) 
 		elif mode =='mlp':
-			steps.append(('multilayer_perceptron', KerasClassifier(build_fn=keras_build_fn, batch_size=256, epochs=15)))
+			steps.append(('multilayer_perceptron', KerasClassifier(build_fn=keras_build_fn, batch_size=256, epochs=15))) # mlp in keras to run on gpu using tensorflow if number of samples is high
 		
 		pipeline = Pipeline(steps)
 
@@ -160,7 +179,7 @@ class operation_mode:
 		self.mode = mode
 
 	def single_train(self, save_timestamp, features, targets):
-
+		# train a model on a traning set and get metrics from the test set
 		logging.info('Performing single train...')
 		s = skl_model()
 		logging.debug('Splitting train and test sets...')
@@ -194,7 +213,7 @@ class operation_mode:
 		plt.savefig(os.path.join('model', save_timestamp + 'feature_importance.png'))
 
 	def plot_learning_curve(self, save_timestamp, features, targets):
-
+		# plot the model learning curve on all the data with cross-validation
 		logging.info('Performing plotting of learning curve...')
 
 		s = skl_model()
@@ -212,6 +231,7 @@ class operation_mode:
 
 if __name__ == '__main__':
 
+	# Arguments
 	parser = ap.ArgumentParser(description='Try to classify the time required to prepare medications as <45 minutes (short) or > 45 minutes (long)', formatter_class=ap.RawTextHelpFormatter)
 	parser.add_argument('--logging_level', metavar='Type_String', type=str, nargs="?", default='info', help='Logging level. Possibilities include "debug" or "info". Metrics are logged with info level, setting level above info will prevent metrics logging.')
 	parser.add_argument('--mode', metavar='Type_String', type=str, nargs="?", default='ert', help='Use "mlp" to train a multilayer perceptron binary classifier, "ert" to train an extremly randomized trees classifier.')
@@ -224,12 +244,11 @@ if __name__ == '__main__':
 	op = args.op
 	restrict_data = args.restrict_data
 
+	# Save timestamp for files generated during a run
 	save_timestamp = datetime.now().strftime('%Y%m%d-%H%M')
 
-	# configure environment
-	print('Configuring logger...')
-
 	# Logger
+	print('Configuring logger...')
 	if logging_level == 'info':
 		ll = logging.INFO
 	elif logging_level =='debug':
@@ -251,10 +270,12 @@ if __name__ == '__main__':
 
 	logging.info('Using mode: {}'.format(mode))
 	
+	# Get the data
 	logging.debug('Obtaining data...')
 	features, targets = data(restrict_data=restrict_data).get_data()
 	logging.debug('Obtained {} samples for features and {} samples for targets'.format(len(features), len(targets)))
 
+	# Execute
 	o = operation_mode(mode)
 	if op == 'st':
 		o.single_train(save_timestamp, features, targets)

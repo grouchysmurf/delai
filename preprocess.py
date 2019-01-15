@@ -1,3 +1,14 @@
+# ==============================================================================
+# LICENSE GOES HERE
+# ==============================================================================
+
+'''
+Author: Maxime Thibault
+
+Preprocess data extracted from pharmacy databases as csv files to pandas dataframes
+for input into the machine learning algorithm.
+'''
+
 import datetime
 
 import numpy as np
@@ -45,7 +56,7 @@ def preprocess_features(restrict_data):
 	processed_features = processed_features.applymap(lambda x:x.strip() if type(x) is str else x)
 
 	print('5. Renaming variables...')
-	features_rename_dict = {'MEDI_NOM':'drug_name', 'SORE_USAGER':'user', 'SORE_CODE_OPER':'operation_code', 'ORDO_STATUT':'internal_or_external', 'endroit':'workbench', 's1':'pharm_disp_1' ,'s2':'pharm_disp_2', 's3':'pharm_disp_3', 's4':'pharm_disp_4', 's5':'pharm_disp_5', 's6':'pharm_disp_6', 's7':'pharm_disp_7', 's8':'pharm_disp_8', 's9':'pharm_disp_9', 'f':'pharm_comp', 'd1':'tech_disp_1', 'd2':'tech_disp_2', 'd3':'tech_disp_3', 'd4':'tech_disp_4', 'd5':'tech_disp_5', 'd7':'tech_disp_7', 'd8':'tech_disp_8', 'd10':'tech_disp_10', 'd11':'tech_disp_11', 'd12':'tech_disp_12', 'd18':'tech_disp_18', 'f1':'tech_comp_1', 'f2':'tech_comp_2', 'f4':'tech_comp_4', 'f5':'tech_comp_5', 'f6':'tech_comp_6', 'f7':'tech_comp_7', 'f8':'tech_comp_8', 'f11':'tech_comp_11', 'f12':'tech_comp_12', 'f45':'tech_comp_45', 'f17':'tech_comp_17', 'soir':'evening', 'fin_de_semaine':'weekend_holiday', 'fait_a_la_fab':'compounding'}
+	features_rename_dict = {'MEDI_NOM':'drug_id', 'SORE_USAGER':'user', 'SORE_CODE_OPER':'operation_code', 'ORDO_STATUT':'internal_or_external', 'endroit':'workbench', 's1':'pharm_disp_1' ,'s2':'pharm_disp_2', 's3':'pharm_disp_3', 's4':'pharm_disp_4', 's5':'pharm_disp_5', 's6':'pharm_disp_6', 's7':'pharm_disp_7', 's8':'pharm_disp_8', 's9':'pharm_disp_9', 'f':'pharm_comp', 'd1':'tech_disp_1', 'd2':'tech_disp_2', 'd3':'tech_disp_3', 'd4':'tech_disp_4', 'd5':'tech_disp_5', 'd7':'tech_disp_7', 'd8':'tech_disp_8', 'd10':'tech_disp_10', 'd11':'tech_disp_11', 'd12':'tech_disp_12', 'd18':'tech_disp_18', 'f1':'tech_comp_1', 'f2':'tech_comp_2', 'f4':'tech_comp_4', 'f5':'tech_comp_5', 'f6':'tech_comp_6', 'f7':'tech_comp_7', 'f8':'tech_comp_8', 'f11':'tech_comp_11', 'f12':'tech_comp_12', 'f45':'tech_comp_45', 'f17':'tech_comp_17', 'soir':'evening', 'fin_de_semaine':'weekend_holiday', 'fait_a_la_fab':'compounding'}
 	targets_rename_dict = {'delai': 'delay'}
 
 	processed_features = processed_features.rename(index=str, columns=features_rename_dict)
