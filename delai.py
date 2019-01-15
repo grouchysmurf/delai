@@ -148,7 +148,7 @@ class skl_model:
 		]
 
 		if mode == 'ert':
-			steps.append(('trees', ExtraTreesClassifier(n_estimators=500, n_jobs=-2, verbose=1)))
+			steps.append(('trees', ExtraTreesClassifier(n_estimators=100, n_jobs=-2, verbose=1)))
 		elif mode =='mlp':
 			steps.append(('multilayer_perceptron', KerasClassifier(build_fn=keras_build_fn, batch_size=256, epochs=15)))
 		
