@@ -17,6 +17,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+import scikitplot as skplt
 import seaborn as sns
 import tensorflow as tf
 from joblib import dump, load
@@ -32,13 +33,14 @@ from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.feature_selection import SelectFromModel
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import f1_score, precision_recall_curve, roc_auc_score, accuracy_score
+from sklearn.metrics import (accuracy_score, f1_score, make_scorer,
+                             precision_recall_curve, roc_auc_score)
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import KBinsDiscretizer, LabelEncoder, OneHotEncoder, StandardScaler
+from sklearn.preprocessing import (KBinsDiscretizer, LabelEncoder,
+                                   OneHotEncoder, StandardScaler)
 
 import preprocess
-import scikitplot as skplt
 
 #################
 #### CLASSES ####
@@ -138,11 +140,6 @@ class skl_model:
 	
 	def processing_pipe(self, mode):
 
-		tb_callback = TensorBoard(log_dir=os.path.join(self.keras_save_path, 'tensorboard_logs'))
-		checkpoint_callback = ModelCheckpoint(filepath=os.path.join(self.keras_save_path, save_timestamp + 'checkpoints'), verbose=1)
-		csv_callback = CSVLogger(filename=os.path.join(self.keras_save_path, save_timestamp + 'history.csv'))
-		earlystop_callback = EarlyStopping(monitor='loss', min_delta=0.01, patience=3, verbose=1)
-
 		keras_build_fn = keras_model().define_model
 
 		steps = [
@@ -150,14 +147,65 @@ class skl_model:
 			('feature_selection', SelectFromModel(ExtraTreesClassifier(n_estimators=100, n_jobs=-2, verbose=1))),
 		]
 
-		if mode == 'mlp':
+		if mode == 'ert':
 			steps.append(('trees', ExtraTreesClassifier(n_estimators=500, n_jobs=-2, verbose=1)))
-		elif mode =='ert':
-			steps.append(('multilayer_perceptron', KerasClassifier(build_fn=keras_build_fn, callbacks=[tb_callback, checkpoint_callback, earlystop_callback, csv_callback], batch_size=256, epochs=100)))
+		elif mode =='mlp':
+			steps.append(('multilayer_perceptron', KerasClassifier(build_fn=keras_build_fn, batch_size=256, epochs=15)))
 		
 		pipeline = Pipeline(steps)
 
 		return pipeline
+
+class operation_mode:
+
+	def __init__(self, mode):
+		self.mode = mode
+
+	def single_train(self, save_timestamp, features, targets):
+
+		logging.info('Performing single train...')
+		s = skl_model(save_timestamp)
+		logging.debug('Splitting train and test sets...')
+		features_train, features_test, targets_train, targets_test = s.get_split_data(features, targets)
+		logging.debug('Preparing targets...')
+		le = s.targets_pipe()
+		y_train = le.fit_transform(targets_train['delay_cat'])
+		y_true = le.transform(targets_test['delay_cat'])
+		pipe = s.processing_pipe(self.mode)
+		logging.debug('Fitting model...')
+		pipe.fit(features_train, y_train)
+		y_pred = pipe.predict(features_test)
+		y_probas = pipe.predict_proba(features_test)
+		
+		logging.debug('Calculating metrics...')
+		acc = accuracy_score(y_true, y_pred)
+		logging.info('Accuracy of model on test set is: {}'.format(acc))
+		f1 = f1_score(y_true, y_pred)
+		logging.info('F1 Score of model on test set is: {}:'.format(f1))
+		auroc = roc_auc_score(y_true, y_probas[:,1])
+		logging.info('Area under ROC curve of model on test set is: {}'.format(auroc))
+		
+		skplt.metrics.plot_confusion_matrix(y_true, y_pred, normalize=True)
+		plt.savefig(os.path.join('model', save_timestamp + 'confusion_matrix.png'))
+		skplt.metrics.plot_roc(y_true, y_probas)
+		plt.savefig(os.path.join('model', save_timestamp + 'roc_curve.png'))
+		skplt.metrics.plot_precision_recall(y_true, y_probas)
+		plt.savefig(os.path.join('model', save_timestamp + 'precision_recall_curve.png'))
+
+		skplt.estimators.plot_feature_importances(pipe.named_steps['feature_selection'].estimator_, x_tick_rotation=45)
+		plt.savefig(os.path.join('model', save_timestamp + 'feature_importance.png'))
+
+	def plot_learning_curve(self, save_timestamp, features, targets):
+
+		logging.info('Performing plotting of learning curve...')
+
+		s = skl_model(save_timestamp)
+		le = s.targets_pipe()
+		y = le.fit_transform(targets['delay_cat'])
+		pipe = s.processing_pipe(self.mode)
+
+		skplt.estimators.plot_learning_curve(pipe, features, y, title='Learning Curve', cv=5, scoring=make_scorer(accuracy_score))
+		plt.savefig(os.path.join('model', save_timestamp + 'learning_curve.png'))
 
 
 ####################
@@ -167,12 +215,16 @@ class skl_model:
 if __name__ == '__main__':
 
 	parser = ap.ArgumentParser(description='Try to classify the time required to prepare medications as <45 minutes (short) or > 45 minutes (long)', formatter_class=ap.RawTextHelpFormatter)
-	parser.add_argument('--mode', metavar='Type_String', type=str, nargs="?", default='mlp', help='Use "mlp" to train a multilayer perceptron binary classifier, "ert" to train an extremly randomized trees classifier.')
 	parser.add_argument('--logging_level', metavar='Type_String', type=str, nargs="?", default='info', help='Logging level. Possibilities include "debug" or "info". Metrics are logged with info level, setting level above info will prevent metrics logging.')
+	parser.add_argument('--mode', metavar='Type_String', type=str, nargs="?", default='ert', help='Use "mlp" to train a multilayer perceptron binary classifier, "ert" to train an extremly randomized trees classifier.')
+	parser.add_argument('--op', metavar='Type_string', type=str, nargs='?', default='single_train', help='Use "st" to perform a single training pass. Use "lc" to plot a learning curve with cross validation.')
+	parser.add_argument('--restrict_data', action='store_true', help='Use this argument to restrict the number of data lines used (for testing.')
 
 	args = parser.parse_args()
-	mode = args.mode
 	logging_level = args.logging_level
+	mode = args.mode
+	op = args.op
+	restrict_data = args.restrict_data
 
 	save_timestamp = datetime.now().strftime('%Y%m%d-%H%M')
 
@@ -199,35 +251,15 @@ if __name__ == '__main__':
 	if logging_level == 'warning':
 		logging.warning('Logging level is set at WARNING. Metrics are logged at level INFO. Metrics will not be logged.')
 
+	logging.info('Using mode: {}'.format(mode))
+	
 	logging.debug('Obtaining data...')
-	features, targets = data(restrict_data=False).get_data()
-	s = skl_model(save_timestamp)
-	logging.debug('Splitting train and test sets...')
-	features_train, features_test, targets_train, targets_test = s.get_split_data(features, targets)
-	logging.debug('Preparing targets...')
-	le = s.targets_pipe()
-	y_train = le.fit_transform(targets_train['delay_cat'])
-	y_true = le.transform(targets_test['delay_cat'])
-	pipe = s.processing_pipe(mode)
-	logging.debug('Fitting model...')
-	pipe.fit(features_train, y_train)
-	y_pred = pipe.predict(features_test)
-	y_probas = pipe.predict_proba(features_test)
-	
-	logging.debug('Calculating metrics...')
-	acc = accuracy_score(y_true, y_pred)
-	logging.info('Accuracy of model on test set is: {}'.format(acc))
-	f1 = f1_score(y_true, y_pred)
-	logging.info('F1 Score of model on test set is: {}:'.format(f1))
-	auroc = roc_auc_score(y_true, y_probas[:,1])
-	logging.info('Area under ROC curve of model on test set is: {}'.format(auroc))
-	
-	skplt.metrics.plot_confusion_matrix(y_true, y_pred, normalize=True)
-	plt.savefig(os.path.join('model', save_timestamp + 'confusion_matrix.png'))
-	skplt.metrics.plot_roc(y_true, y_probas)
-	plt.savefig(os.path.join('model', save_timestamp + 'roc_curve.png'))
-	skplt.metrics.plot_precision_recall(y_true, y_probas)
-	plt.savefig(os.path.join('model', save_timestamp + 'precision_recall_curve.png'))
+	features, targets = data(restrict_data=restrict_data).get_data()
 
-	skplt.estimators.plot_feature_importances(pipe.named_steps['feature_selection'].estimator_, x_tick_rotation=45)
-	plt.savefig(os.path.join('model', save_timestamp + 'feature_importance.png'))
+	o = operation_mode(mode)
+	if op == 'st':
+		o.single_train(save_timestamp, features, targets)
+	elif op == 'lc':
+		o.plot_learning_curve(save_timestamp, features, targets)
+
+	quit()

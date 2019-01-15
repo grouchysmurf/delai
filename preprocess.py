@@ -18,6 +18,7 @@ def preprocess_features(restrict_data):
 	print('Reading CSV....')
 	ml_dataframe = pd.read_csv(datafile, sep=',', index_col=False)
 	if restrict_data == True:
+		print('Data restriction enabled !')
 		ml_dataframe = ml_dataframe[-50000:]
 
 	# Create synthetic features.
