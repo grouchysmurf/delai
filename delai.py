@@ -22,17 +22,17 @@ import seaborn as sns
 import tensorflow as tf
 from joblib import dump, load
 from keras import backend as K
-from keras.callbacks import (CSVLogger, EarlyStopping, ModelCheckpoint,
-                             TensorBoard)
 from keras.layers import Dense, Dropout
 from keras.models import Sequential, load_model
 from keras.utils import multi_gpu_model
 from keras.wrappers.scikit_learn import KerasClassifier
 from matplotlib import pyplot as plt
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.decomposition import PCA
+from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
 from sklearn.feature_selection import SelectFromModel
 from sklearn.impute import SimpleImputer
+from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import (accuracy_score, f1_score, make_scorer,
                              precision_recall_curve, roc_auc_score)
 from sklearn.model_selection import train_test_split, StratifiedKFold
@@ -160,15 +160,20 @@ class skl_model:
 		# base steps
 		steps = [
 			('features_encoding', self.features_encoding_pipe()),
-			('feature_selection', SelectFromModel(ExtraTreesClassifier(n_estimators=100, n_jobs=-2, verbose=1))),
+			#('feature_selection', SelectFromModel(ExtraTreesClassifier(n_estimators=100, n_jobs=-2, verbose=1))),
 		]
 
 		# adjust final step based on desired mode
 		if mode == 'ert':
 			steps.append(('trees', ExtraTreesClassifier(n_estimators=100, n_jobs=-2, verbose=1))) 
+		elif mode == 'rf':
+			steps.append(('random_forest', RandomForestClassifier(n_estimators=100, n_jobs=-2, verbose=1)))
 		elif mode =='mlp':
-			steps.append(('multilayer_perceptron', KerasClassifier(build_fn=keras_build_fn, batch_size=256, epochs=15))) # mlp in keras to run on gpu using tensorflow if number of samples is high
-		
+			keras_build_fn = keras_model().define_model
+			steps.append(('multilayer_perceptron', KerasClassifier(build_fn=keras_build_fn, batch_size=256, epochs=15)))
+		elif mode == 'sgd':
+			steps.append(('sgd_classifier', SGDClassifier(loss='log', max_iter=1000, tol=0.005, shuffle=True, verbose=1, n_jobs=-2, early_stopping=True, n_iter_no_change=3)))
+				
 		pipeline = Pipeline(steps)
 
 		return pipeline
@@ -231,10 +236,9 @@ class operation_mode:
 
 if __name__ == '__main__':
 
-	# Arguments
 	parser = ap.ArgumentParser(description='Try to classify the time required to prepare medications as <45 minutes (short) or > 45 minutes (long)', formatter_class=ap.RawTextHelpFormatter)
 	parser.add_argument('--logging_level', metavar='Type_String', type=str, nargs="?", default='info', help='Logging level. Possibilities include "debug" or "info". Metrics are logged with info level, setting level above info will prevent metrics logging.')
-	parser.add_argument('--mode', metavar='Type_String', type=str, nargs="?", default='ert', help='Use "mlp" to train a multilayer perceptron binary classifier, "ert" to train an extremly randomized trees classifier.')
+	parser.add_argument('--mode', metavar='Type_String', type=str, nargs="?", default='ert', help='Use "mlp" to train a multilayer perceptron binary classifier, "ert" to train an extremly randomized trees classifier, "sgd" to train a SGDClassifier')
 	parser.add_argument('--op', metavar='Type_string', type=str, nargs='?', default='st', help='Use "st" to perform a single training pass. Use "lc" to plot a learning curve with cross validation.')
 	parser.add_argument('--restrict_data', action='store_true', help='Use this argument to restrict the number of data lines used (for testing.')
 
@@ -244,7 +248,14 @@ if __name__ == '__main__':
 	op = args.op
 	restrict_data = args.restrict_data
 
-	# Save timestamp for files generated during a run
+	# check arguments
+	if mode not in ['ert', 'rf', 'mlp', 'sgd']:
+		logging.critical('Mode not implemented. Quitting...')
+		quit()
+	if op not in ['st', 'lc']:
+		logging.critical('Operation not implemented. Quitting...')
+		quit()
+
 	save_timestamp = datetime.now().strftime('%Y%m%d-%H%M')
 
 	# Logger
@@ -265,8 +276,8 @@ if __name__ == '__main__':
 			logging.StreamHandler()
 		])
 	logging.debug('Logger successfully configured.')
-	if logging_level == 'warning':
-		logging.warning('Logging level is set at WARNING. Metrics are logged at level INFO. Metrics will not be logged.')
+	if (logging_level == 'warning') or (logging_level =='error') or (logging_level =='criticial'):
+		logging.warning('Logging level is set at {}. Metrics are logged at level INFO. Metrics will not be logged.'.format(logging_level))
 
 	logging.info('Using mode: {}'.format(mode))
 	
