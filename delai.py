@@ -135,7 +135,7 @@ class skl_model:
 
 		continuous_columns_to_bin = ['time_frax']
 
-		continuous_columns_to_scale = ['workload']
+		continuous_columns_to_scale = ['overall_workload', 'workbench_workload']
 
 		# build the transformers for the column transformer
 		features.append(('string_columns', self.one_hot_pipe(), string_columns_to_one_hot))
@@ -216,6 +216,46 @@ class operation_mode:
 		y = le.fit_transform(targets['delay_cat'])
 		pipe = s.processing_pipe(self.mode)
 		logging.debug('Starting search...')
+		'''
+		grid = [dict(feature_selection=[
+					None, 
+					RFE(RandomForestClassifier(n_jobs=-2, verbose=1), verbose=1, step=0.1),
+					RFE(RandomForestClassifier(n_jobs=-2, verbose=1), verbose=1, step=1),
+					SelectFromModel(RandomForestClassifier(n_jobs=-2, verbose=1))],
+				clf=[
+					RandomForestClassifier(n_jobs=-2, verbose=1)
+				],
+				feature_selection__estimator__n_estimators=[10,100],
+				feature_selection__estimator__max_depth=[None,10,100],
+				clf__n_estimators=[10, 100],
+				clf__max_depth=[None, 10,100],
+				),
+				dict(feature_selection=[
+					None, 
+					RFE(RandomForestClassifier(n_jobs=-2, verbose=1), verbose=1, step=0.1),
+					RFE(RandomForestClassifier(n_jobs=-2, verbose=1), verbose=1, step=1),
+					SelectFromModel(RandomForestClassifier(n_jobs=-2, verbose=1))],
+				clf=[
+					KerasClassifier(build_fn=keras_model().define_model, epochs=1000, callbacks=[EarlyStopping(monitor='loss', min_delta=0.005, patience=3, verbose=1)]),
+				],
+				clf__batch_size=[256,1024],
+				clf__layer_1_size=[8,32,128],
+				clf__layer_2_size=[8,32,128],
+				clf__dropout_rate=[0, 0.2, 0.5],
+				clf__l1_reg=[0, 0.1, 0.5],
+				clf__l2_reg=[0, 0.1, 0.5]
+				),
+				dict(feature_selection=[
+					None, 
+					RFE(RandomForestClassifier(n_jobs=-2, verbose=1), verbose=1, step=0.1),
+					RFE(RandomForestClassifier(n_jobs=-2, verbose=1), verbose=1, step=1),
+					SelectFromModel(RandomForestClassifier(n_jobs=-2, verbose=1))],
+				clf=[
+					SGDClassifier(loss='log', max_iter=1000, tol=0.005, shuffle=True, verbose=1, n_jobs=-2, early_stopping=True, n_iter_no_change=3)
+				],
+				)
+				]
+		'''
 		grid = dict(feature_selection=[None, 
 							RFE(RandomForestClassifier(n_estimators=10, n_jobs=-2, verbose=1, max_depth=10), step=0.1, verbose=1),
 							RFE(RandomForestClassifier(n_estimators=100, n_jobs=-2, verbose=1, max_depth=10), step=0.1, verbose=1),
@@ -244,6 +284,7 @@ class operation_mode:
 		rcv_results_filtered.rename(inplace=True, index=str, columns={'split0_test_accuracy':'Test accuracy', 'split1_test_accuracy':'Test accuracy', 'split2_test_accuracy':'Test accuracy', 'split3_test_accuracy':'Test accuracy', 'split4_test_accuracy':'Test accuracy', 'split0_test_f1':'Test F1', 'split1_test_f1':'Test F1', 'split2_test_f1':'Test F1', 'split3_test_f1':'Test F1', 'split4_test_f1':'Test F1', 'split0_test_roc_auc':'Test AUROC', 'split1_test_roc_auc':'Test AUROC', 'split2_test_roc_auc':'Test AUROC', 'split3_test_roc_auc':'Test AUROC','split4_test_roc_auc':'Test AUROC'})
 		rcv_results_graph_df = rcv_results_filtered.stack().reset_index()
 		rcv_results_graph_df.rename(inplace=True, index=str, columns={'level_0':'Iteration', 'level_1':'Metric', 0:'Result'})
+		rcv_results_graph_df.sort_values(by='Result', ascending=False, inplace=True)
 		sns.relplot(x='Iteration', y='Result', hue='Metric', kind='line', ci='sd', data=rcv_results_graph_df)
 		plt.savefig(os.path.join('model', save_timestamp + 'random_grid_search_results.png'))
 		

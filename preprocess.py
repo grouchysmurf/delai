@@ -35,7 +35,6 @@ def preprocess_features(datafile, restrict_data):
 	print('1. Calculating dates and times...')
 	ml_dataframe['datetime'] = pd.to_datetime(ml_dataframe['date_oper'].astype(str)+' '+ml_dataframe['heure_oper'].astype(str), format='%Y%m%d %H:%M')
 	ml_dataframe.sort_values(by=['datetime'], inplace=True)
-	ml_dataframe.set_index('datetime', inplace=True)
 	ml_dataframe['time_frax'] = ml_dataframe['heure_oper'].str.slice(start=0, stop=2).astype(np.float) + ml_dataframe['heure_oper'].str.slice(start=3, stop=5).astype(np.float)/60
 	processed_targets = pd.DataFrame()
 	processed_targets[selected_targets] = ml_dataframe[selected_targets]
@@ -45,8 +44,9 @@ def preprocess_features(datafile, restrict_data):
 	processed_features['compounding'] = processed_features['endroit'].apply(lambda x: 1 if x > 0 else 0)
 
 	print('3. Calculating workload...')
-	processed_features['workload'] = processed_features['SORE_NOAUTO'].rolling(window='2700s').count()
-
+	processed_features['overall_workload'] = processed_features.rolling(on='datetime', window='2700s')['SORE_NOAUTO'].count()
+	processed_features['workbench_workload'] = processed_features.groupby('endroit', as_index=False, group_keys=False).apply(get_rolling_groupcount, '2700s')
+	
 	# Remove stuff tensorflow can't use (datetimes)
 	processed_features = processed_features.drop(['date_oper', 'heure_oper'], axis=1)
 
@@ -61,3 +61,6 @@ def preprocess_features(datafile, restrict_data):
 	processed_targets = processed_targets.rename(index=str, columns=targets_rename_dict)
 
 	return processed_features, processed_targets
+
+def get_rolling_groupcount(grp, freq):
+    return grp.rolling(freq, on='datetime')['SORE_NOAUTO'].count()
