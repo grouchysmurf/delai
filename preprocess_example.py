@@ -18,10 +18,8 @@ import pandas as pd
 #### FUNCTIONS #####
 ####################
 
-def preprocess_features(restrict_data):  
+def preprocess_features(datafile, restrict_data):  
 	
-	datafile = 'data/traintest.csv' # Specify data file path here
-
 	selected_targets = [
 		'delai'
 		]

@@ -22,23 +22,27 @@ import seaborn as sns
 import tensorflow as tf
 from joblib import dump, load
 from keras import backend as K
+from keras.callbacks import EarlyStopping
 from keras.layers import Dense, Dropout
 from keras.models import Sequential, load_model
+from keras.regularizers import l1_l2
 from keras.utils import multi_gpu_model
 from keras.wrappers.scikit_learn import KerasClassifier
 from matplotlib import pyplot as plt
 from sklearn.compose import ColumnTransformer
 from sklearn.decomposition import PCA
 from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
-from sklearn.feature_selection import SelectFromModel
+from sklearn.feature_selection import RFE, SelectFromModel
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import (accuracy_score, f1_score, make_scorer,
-                             precision_recall_curve, roc_auc_score)
-from sklearn.model_selection import train_test_split, StratifiedKFold
+							 precision_recall_curve, roc_auc_score)
+from sklearn.model_selection import (GridSearchCV, RandomizedSearchCV,
+									 StratifiedKFold, TimeSeriesSplit,
+									 cross_validate)
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import (KBinsDiscretizer, LabelEncoder,
-                                   OneHotEncoder, StandardScaler)
+								   OneHotEncoder, StandardScaler)
 
 import preprocess
 
@@ -48,9 +52,9 @@ import preprocess
 
 class data:
 
-	def __init__(self, restrict_data=False):
+	def __init__(self, datafile, restrict_data=False):
 		# load data
-		self.features, self.targets = preprocess.preprocess_features(restrict_data)
+		self.features, self.targets = preprocess.preprocess_features(datafile, restrict_data)
 		# categorize
 		self.targets['delay_cat'] = self.targets['delay'].apply(lambda x: 0 if x < 45 else 1)  # ADJUST CUTOFF HERE
 
@@ -64,15 +68,15 @@ class keras_model:
 	def __init__(self):
 		pass
 
-	def define_model(self):
+	def define_model(self, layer_1_size=64, layer_2_size=64, dropout_rate=0.5, l1_reg=0, l2_reg=0.01):
 
 		# basic multilayer perceptron
 		with tf.device('/cpu:0'):
 			model = Sequential()
-			model.add(Dense(1024, activation='relu'))
-			model.add(Dropout(0.2))
-			model.add(Dense(32, activation='relu'))
-			model.add(Dropout(0.2))
+			model.add(Dense(layer_1_size, activation='relu', kernel_regularizer=l1_l2(l1=l1_reg, l2=l2_reg)))
+			model.add(Dropout(dropout_rate))
+			model.add(Dense(layer_2_size, activation='relu', kernel_regularizer=l1_l2(l1=l1_reg, l2=l2_reg)))
+			model.add(Dropout(dropout_rate))
 			model.add(Dense(1, activation='sigmoid'))
 
 		# check if gpu
@@ -97,11 +101,6 @@ class skl_model:
 		pathlib.Path(self.skl_save_path).mkdir(parents=True, exist_ok=True)
 		self.keras_save_path = os.path.join(os.getcwd(), 'model')
 		pathlib.Path(self.keras_save_path).mkdir(parents=True, exist_ok=True)
-
-	def get_split_data(self, features, targets):
-		# perform a train-test split on the input data
-		features_train, features_test, targets_train, targets_test = train_test_split(features, targets)
-		return features_train, features_test, targets_train, targets_test
 	
 	def one_hot_pipe(self):
 		# encode strings and string-like to one hot vectors
@@ -154,25 +153,21 @@ class skl_model:
 	
 	def processing_pipe(self, mode):
 
-		# get the keras model build function
-		keras_build_fn = keras_model().define_model
-
 		# base steps
 		steps = [
 			('features_encoding', self.features_encoding_pipe()),
-			#('feature_selection', SelectFromModel(ExtraTreesClassifier(n_estimators=100, n_jobs=-2, verbose=1))),
+			('feature_selection', RFE(RandomForestClassifier(n_estimators=10, n_jobs=-2, verbose=1), step=0.2, verbose=1)),
 		]
 
 		# adjust final step based on desired mode
 		if mode == 'ert':
-			steps.append(('trees', ExtraTreesClassifier(n_estimators=100, n_jobs=-2, verbose=1))) 
+			steps.append(('clf', ExtraTreesClassifier(n_estimators=10, n_jobs=-2, verbose=1))) 
 		elif mode == 'rf':
-			steps.append(('random_forest', RandomForestClassifier(n_estimators=100, n_jobs=-2, verbose=1)))
+			steps.append(('clf', RandomForestClassifier(n_estimators=10, n_jobs=-2, verbose=1)))
 		elif mode =='mlp':
-			keras_build_fn = keras_model().define_model
-			steps.append(('multilayer_perceptron', KerasClassifier(build_fn=keras_build_fn, batch_size=256, epochs=15)))
+			steps.append(('clf', KerasClassifier(build_fn=keras_model().define_model, batch_size=256, epochs=20)))
 		elif mode == 'sgd':
-			steps.append(('sgd_classifier', SGDClassifier(loss='log', max_iter=1000, tol=0.005, shuffle=True, verbose=1, n_jobs=-2, early_stopping=True, n_iter_no_change=3)))
+			steps.append(('clf', SGDClassifier(loss='log', max_iter=1000, tol=0.005, shuffle=True, verbose=1, n_jobs=-2, early_stopping=True, n_iter_no_change=3)))
 				
 		pipeline = Pipeline(steps)
 
@@ -183,22 +178,89 @@ class operation_mode:
 	def __init__(self, mode):
 		self.mode = mode
 
-	def single_train(self, save_timestamp, features, targets):
-		# train a model on a traning set and get metrics from the test set
+	def single_train_save(self, save_timestamp, features, targets):
 		logging.info('Performing single train...')
 		s = skl_model()
-		logging.debug('Splitting train and test sets...')
-		features_train, features_test, targets_train, targets_test = s.get_split_data(features, targets)
 		logging.debug('Preparing targets...')
 		le = s.targets_pipe()
-		y_train = le.fit_transform(targets_train['delay_cat'])
-		y_true = le.transform(targets_test['delay_cat'])
+		y = le.fit_transform(targets['delay_cat'])
 		pipe = s.processing_pipe(self.mode)
 		logging.debug('Fitting model...')
-		pipe.fit(features_train, y_train)
-		y_pred = pipe.predict(features_test)
-		y_probas = pipe.predict_proba(features_test)
+		pipe.fit(features, y)
+
+		logging.info('Saving...')
+		dump([pipe, le], os.path.join('model', save_timestamp + 'model.joblib'))
+
+	def single_cross_validation(self, save_timestamp, features, targets):
+		logging.info('Performing single cross-validation')
+		s = skl_model()
+		logging.debug('Preparing targets...')
+		le = s.targets_pipe()
+		y = le.fit_transform(targets['delay_cat'])
+		pipe = s.processing_pipe(self.mode)
+		logging.debug('Cross-validating...')
+		cv_results_dict = cross_validate(pipe, features, y, scoring=['accuracy', 'f1', 'roc_auc'], cv=TimeSeriesSplit(n_splits=5), verbose=1)
+		cv_results_df = pd.DataFrame.from_dict(cv_results_dict)
+		cv_results_filtered = cv_results_df[['train_f1', 'train_roc_auc', 'train_accuracy', 'test_f1', 'test_roc_auc', 'test_accuracy']].copy()
+		cv_results_filtered.rename(inplace=True, index=str, columns={'train_f1': 'Train F1', 'train_roc_auc':'Train AUROC', 'train_accuracy':'Train accuracy', 'test_f1': 'Test F1', 'test_roc_auc':'Test AUCROC', 'test_accuracy':'Test accuracy'})
+		cv_results_graph_df = cv_results_filtered.stack().reset_index()
+		cv_results_graph_df.rename(inplace=True, index=str, columns={'level_0':'Split', 'level_1':'Metric', 0:'Result'})
+		sns.relplot(x='Split', y='Result', hue='Metric', kind='line', data=cv_results_graph_df)
+		plt.savefig(os.path.join('model', save_timestamp + 'crossval_results.png'))
+
+	def random_cross_validation(self, save_timestamp, features, targets, n_iter):
+		logging.info('Performing random search with cross validation')
+		s = skl_model()
+		logging.debug('Preparing targets...')
+		le = s.targets_pipe()
+		y = le.fit_transform(targets['delay_cat'])
+		pipe = s.processing_pipe(self.mode)
+		logging.debug('Starting search...')
+		grid = dict(feature_selection=[None, 
+							RFE(RandomForestClassifier(n_estimators=10, n_jobs=-2, verbose=1, max_depth=10), step=0.1, verbose=1),
+							RFE(RandomForestClassifier(n_estimators=100, n_jobs=-2, verbose=1, max_depth=10), step=0.1, verbose=1),
+							RFE(RandomForestClassifier(n_estimators=10, n_jobs=-2, verbose=1, max_depth=100), step=0.1, verbose=1),
+							RFE(RandomForestClassifier(n_estimators=100, n_jobs=-2, verbose=1, max_depth=100), step=0.1, verbose=1),
+							SelectFromModel(RandomForestClassifier(n_estimators=10, n_jobs=-2, verbose=1, max_depth=10)),
+							SelectFromModel(RandomForestClassifier(n_estimators=100, n_jobs=-2, verbose=1, max_depth=10)),
+							SelectFromModel(RandomForestClassifier(n_estimators=10, n_jobs=-2, verbose=1, max_depth=100)),
+							SelectFromModel(RandomForestClassifier(n_estimators=100, n_jobs=-2, verbose=1, max_depth=100))],
+					clf=[RandomForestClassifier(n_estimators=10, n_jobs=-2, verbose=1, max_depth=10),
+							RandomForestClassifier(n_estimators=100, n_jobs=-2, verbose=1, max_depth=10),
+							RandomForestClassifier(n_estimators=10, n_jobs=-2, verbose=1, max_depth=100),
+							RandomForestClassifier(n_estimators=100, n_jobs=-2, verbose=1, max_depth=100),
+							KerasClassifier(build_fn=keras_model().define_model, batch_size=256, epochs=1000, layer_1_size=64, layer_2_size=64, dropout_rate=0.5, l1_reg=0, l2_reg=0.01, callbacks=[EarlyStopping(monitor='loss', min_delta=0.005, patience=3, verbose=1)]),
+							KerasClassifier(build_fn=keras_model().define_model, batch_size=1024, epochs=1000, layer_1_size=64, layer_2_size=64, dropout_rate=0.5, l1_reg=0, l2_reg=0.01, callbacks=[EarlyStopping(monitor='loss', min_delta=0.005, patience=3, verbose=1)]),
+							KerasClassifier(build_fn=keras_model().define_model, batch_size=256, epochs=1000, layer_1_size=128, layer_2_size=128, dropout_rate=0.5, l1_reg=0, l2_reg=0.01, callbacks=[EarlyStopping(monitor='loss', min_delta=0.005, patience=3, verbose=1)]),
+							KerasClassifier(build_fn=keras_model().define_model, batch_size=1024, epochs=1000, layer_1_size=128, layer_2_size=128, dropout_rate=0.5, l1_reg=0, l2_reg=0.01, callbacks=[EarlyStopping(monitor='loss', min_delta=0.005, patience=3, verbose=1)]),
+							KerasClassifier(build_fn=keras_model().define_model, batch_size=256, epochs=1000, layer_1_size=128, layer_2_size=128, dropout_rate=0.5, l1_reg=0, l2_reg=0.05, callbacks=[EarlyStopping(monitor='loss', min_delta=0.005, patience=3, verbose=1)]),
+							KerasClassifier(build_fn=keras_model().define_model, batch_size=1024, epochs=1000, layer_1_size=128, layer_2_size=128, dropout_rate=0.5, l1_reg=0, l2_reg=0.05, callbacks=[EarlyStopping(monitor='loss', min_delta=0.005, patience=3, verbose=1)]),
+							SGDClassifier(loss='log', max_iter=1000, tol=0.005, shuffle=True, verbose=1, n_jobs=-2, early_stopping=True, n_iter_no_change=3)])
+		rcv = RandomizedSearchCV(pipe, grid, n_iter=n_iter, scoring=['accuracy', 'f1', 'roc_auc'], cv=TimeSeriesSplit(n_splits=5), verbose=1, error_score=0, return_train_score=True, refit='accuracy')
+		rcv.fit(features, y)
+		rcv_results_df = pd.DataFrame.from_dict(rcv.cv_results_)
+		rcv_results_df.to_csv(os.path.join('model', save_timestamp + 'random_cross_val_results.csv'))
+		rcv_results_filtered = rcv_results_df[['split0_test_accuracy', 'split1_test_accuracy', 'split2_test_accuracy','split3_test_accuracy', 'split4_test_accuracy', 'split0_test_f1', 'split1_test_f1', 'split2_test_f1', 'split3_test_f1', 'split4_test_f1', 'split0_test_roc_auc', 'split1_test_roc_auc', 'split2_test_roc_auc', 'split3_test_roc_auc','split4_test_roc_auc']].copy()
+		rcv_results_filtered.rename(inplace=True, index=str, columns={'split0_test_accuracy':'Test accuracy', 'split1_test_accuracy':'Test accuracy', 'split2_test_accuracy':'Test accuracy', 'split3_test_accuracy':'Test accuracy', 'split4_test_accuracy':'Test accuracy', 'split0_test_f1':'Test F1', 'split1_test_f1':'Test F1', 'split2_test_f1':'Test F1', 'split3_test_f1':'Test F1', 'split4_test_f1':'Test F1', 'split0_test_roc_auc':'Test AUROC', 'split1_test_roc_auc':'Test AUROC', 'split2_test_roc_auc':'Test AUROC', 'split3_test_roc_auc':'Test AUROC','split4_test_roc_auc':'Test AUROC'})
+		rcv_results_graph_df = rcv_results_filtered.stack().reset_index()
+		rcv_results_graph_df.rename(inplace=True, index=str, columns={'level_0':'Iteration', 'level_1':'Metric', 0:'Result'})
+		sns.relplot(x='Iteration', y='Result', hue='Metric', kind='line', ci='sd', data=rcv_results_graph_df)
+		plt.savefig(os.path.join('model', save_timestamp + 'random_grid_search_results.png'))
 		
+	def valid(self, save_timestamp, model_file, features, targets):
+		logging.debug('Loading model from file: {}...'.format(model_file))
+		try:
+			pipe, le = load(model_file)
+			logging.debug('Model successfully loaded from file.')
+		except Exception as e:
+			logging.critical('Model could not be loaded because of exception: {} . Quitting...'.format(e))
+			quit()
+		y_true = le.transform(targets['delay_cat'])
+		y_pred = pipe.predict(features)
+		y_probas = pipe.predict_proba(features)
+		self.plot_metrics(save_timestamp, y_true, y_pred, y_probas)
+
+	def plot_metrics(self, save_timestamp, y_true, y_pred, y_probas):
 		logging.debug('Calculating metrics...')
 		acc = accuracy_score(y_true, y_pred)
 		logging.info('Accuracy of model on test set is: {}'.format(acc))
@@ -214,9 +276,9 @@ class operation_mode:
 		skplt.metrics.plot_precision_recall(y_true, y_probas)
 		plt.savefig(os.path.join('model', save_timestamp + 'precision_recall_curve.png'))
 
-		skplt.estimators.plot_feature_importances(pipe.named_steps['feature_selection'].estimator_, x_tick_rotation=45)
-		plt.savefig(os.path.join('model', save_timestamp + 'feature_importance.png'))
-
+		# skplt.estimators.plot_feature_importances(pipe.named_steps['feature_selection'].estimator_, x_tick_rotation=45)
+		# plt.savefig(os.path.join('model', save_timestamp + 'feature_importance.png'))
+	
 	def plot_learning_curve(self, save_timestamp, features, targets):
 		# plot the model learning curve on all the data with cross-validation
 		logging.info('Performing plotting of learning curve...')
@@ -226,7 +288,7 @@ class operation_mode:
 		y = le.fit_transform(targets['delay_cat'])
 		pipe = s.processing_pipe(self.mode)
 
-		skplt.estimators.plot_learning_curve(pipe, features, y, title='Learning Curve', cv=StratifiedKFold(shuffle=True, n_splits=5), scoring='accuracy')
+		skplt.estimators.plot_learning_curve(pipe, features, y, title='Learning Curve', cv=TimeSeriesSplit(n_splits=5), scoring='accuracy')
 		plt.savefig(os.path.join('model', save_timestamp + 'learning_curve.png'))
 
 
@@ -237,35 +299,54 @@ class operation_mode:
 if __name__ == '__main__':
 
 	parser = ap.ArgumentParser(description='Try to classify the time required to prepare medications as <45 minutes (short) or > 45 minutes (long)', formatter_class=ap.RawTextHelpFormatter)
-	parser.add_argument('--logging_level', metavar='Type_String', type=str, nargs="?", default='info', help='Logging level. Possibilities include "debug" or "info". Metrics are logged with info level, setting level above info will prevent metrics logging.')
-	parser.add_argument('--mode', metavar='Type_String', type=str, nargs="?", default='ert', help='Use "mlp" to train a multilayer perceptron binary classifier, "ert" to train an extremly randomized trees classifier, "sgd" to train a SGDClassifier')
-	parser.add_argument('--op', metavar='Type_string', type=str, nargs='?', default='st', help='Use "st" to perform a single training pass. Use "lc" to plot a learning curve with cross validation.')
-	parser.add_argument('--restrict_data', action='store_true', help='Use this argument to restrict the number of data lines used (for testing.')
+	parser.add_argument('--verbose', action='store_true', help='Use this argument to log at DEBUG level, otherwise logging will occur at level INFO.')
+	parser.add_argument('--mode', metavar='Type_String', type=str, nargs="?", default='rf', help='Use "mlp" to train a multilayer perceptron binary classifier, "ert" to train an extremly randomized trees classifier, "sgd" to train a SGDClassifier')
+	parser.add_argument('--op', metavar='Type_string', type=str, nargs='?', default='sv', help='Use "scv" to perform a single cross-validation using TimeSeriesSplit. Use "rcv" to perform randomized grid search with cross validation. Use "sv" to perform a single training pass then save. Use "lc" to plot a learning curve with cross validation. Use "val" to perform a single validation on a saved model, specify model file to use with --modelfile argument.')
+	parser.add_argument('--datafile', metavar='Type_string', type=str, nargs='?', default='data/traintest.csv', help='Datafile to use. Defaults to "data/traintest.csv". Use train and test file for st, sv, lc operations. Use validation file for val operation.')
+	parser.add_argument('--modelfile', metavar='Type_string', type=str, nargs='?', default='', help='Model file to use. Required for val op.')
+	parser.add_argument('--restrict_data', action='store_true', help='Use this argument to restrict the number of data lines used (for testing).')
+	parser.add_argument('--rcviter', metavar='Type_string', type=str, nargs='?', default='10', help='Number of iterations to perform when using randomized grid search. Defaults to 10.')
 
 	args = parser.parse_args()
-	logging_level = args.logging_level
+	verbose = args.verbose
 	mode = args.mode
 	op = args.op
 	restrict_data = args.restrict_data
+	datafile = args.datafile
+	model_file = args.modelfile
+	rcv_iter = int(args.rcviter)
 
 	# check arguments
 	if mode not in ['ert', 'rf', 'mlp', 'sgd']:
-		logging.critical('Mode not implemented. Quitting...')
+		logging.critical('Mode {} not implemented. Quitting...'.format(mode))
 		quit()
-	if op not in ['st', 'lc']:
-		logging.critical('Operation not implemented. Quitting...')
+	if op not in ['sv', 'scv', 'rcv', 'lc', 'val']:
+		logging.critical('Operation {} not implemented. Quitting...'.format(op))
 		quit()
+	try:
+		if(not os.path.isfile(datafile)):
+			logging.critical('Data file: {} not found. Quitting...'.format(datafile))
+			quit()
+	except TypeError:
+		logging.critical('Invalid definition file given. Quitting...')
+		quit()
+	if op == 'val':
+		try:
+			if(not os.path.isfile(model_file)):
+				logging.critical('Model file: {} not found. Quitting...'.format(model_file))
+				quit()
+		except TypeError:
+			logging.critical('Invalid model file given. Quitting...')
+			quit()
 
 	save_timestamp = datetime.now().strftime('%Y%m%d-%H%M')
 
 	# Logger
 	print('Configuring logger...')
-	if logging_level == 'info':
-		ll = logging.INFO
-	elif logging_level =='debug':
+	if verbose == True :
 		ll = logging.DEBUG
-	elif logging_level == 'warning':
-		ll = logging.WARNING
+	else:
+		ll = logging.INFO
 	logging_path = os.path.join(os.getcwd(), 'logs', 'build_model')
 	pathlib.Path(logging_path).mkdir(parents=True, exist_ok=True)
 	logging.basicConfig(
@@ -276,21 +357,24 @@ if __name__ == '__main__':
 			logging.StreamHandler()
 		])
 	logging.debug('Logger successfully configured.')
-	if (logging_level == 'warning') or (logging_level =='error') or (logging_level =='criticial'):
-		logging.warning('Logging level is set at {}. Metrics are logged at level INFO. Metrics will not be logged.'.format(logging_level))
 
-	logging.info('Using mode: {}'.format(mode))
+	logging.info('Using mode: {} and performing operation: {}'.format(mode, op))
 	
 	# Get the data
 	logging.debug('Obtaining data...')
-	features, targets = data(restrict_data=restrict_data).get_data()
+	features, targets = data(datafile, restrict_data=restrict_data).get_data()
 	logging.debug('Obtained {} samples for features and {} samples for targets'.format(len(features), len(targets)))
 
 	# Execute
 	o = operation_mode(mode)
-	if op == 'st':
-		o.single_train(save_timestamp, features, targets)
+	if op == 'sv':
+		o.single_train_save(save_timestamp, features, targets)
+	elif op == 'scv':
+		o.single_cross_validation(save_timestamp, features, targets)
 	elif op == 'lc':
 		o.plot_learning_curve(save_timestamp, features, targets)
-
+	elif op == 'val':
+		o.valid(save_timestamp, model_file, features, targets)
+	elif op == 'rcv':
+		o.random_cross_validation(save_timestamp, features, targets, rcv_iter)
 	quit()

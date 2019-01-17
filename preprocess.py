@@ -18,9 +18,7 @@ import pandas as pd
 #### FUNCTIONS #####
 ####################
 
-def preprocess_features(restrict_data):  
-	
-	datafile = 'data/traintest.csv'
+def preprocess_features(datafile, restrict_data):  
 
 	selected_targets = [
 		'delai'
